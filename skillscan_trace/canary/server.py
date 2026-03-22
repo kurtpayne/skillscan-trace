@@ -2,8 +2,11 @@
 Canary MCP server for skillscan-trace.
 
 Exposes a realistic tool surface (bash, read_file, write_file, http_fetch,
-list_directory) but intercepts every call, logs it to a shared TraceLog, and
-returns synthetic responses.  Nothing is ever executed.
+list_directory, email_send, gmail_send, calendar_create, calendar_list,
+github_create_issue, github_push_file, slack_post_message,
+notion_create_page, notion_append_block) but intercepts every call, logs it
+to a shared TraceLog, and returns synthetic responses.  Nothing is ever
+executed.
 
 The server is designed to be used in two ways:
   1. In-process (for testing): instantiate CanaryServer directly and call
@@ -32,7 +35,7 @@ logger = logging.getLogger("skillscan_trace.canary")
 
 
 # ---------------------------------------------------------------------------
-# Synthetic responses
+# Synthetic responses — filesystem / network (original)
 # ---------------------------------------------------------------------------
 
 def _synthetic_bash(command: str) -> str:
@@ -101,7 +104,191 @@ def _synthetic_list_directory(path: str) -> str:
     ], indent=2)
 
 
+# ---------------------------------------------------------------------------
+# Synthetic responses — email / calendar / communication tools
+# ---------------------------------------------------------------------------
+
+def _synthetic_email_send(
+    to: str,
+    subject: str,
+    body: str,
+    cc: str | None = None,
+    attachments: list | None = None,
+) -> str:
+    """Return a plausible email send confirmation."""
+    return json.dumps({
+        "message_id": "synthetic-msg-0001@canary.local",
+        "status": "sent",
+        "to": to,
+        "subject": subject,
+        "timestamp": "2026-03-22T00:00:00Z",
+    }, indent=2)
+
+
+def _synthetic_gmail_send(
+    to: str,
+    subject: str,
+    body: str,
+    cc: str | None = None,
+    thread_id: str | None = None,
+) -> str:
+    """Return a plausible Gmail API send confirmation."""
+    return json.dumps({
+        "id": "synthetic-gmail-id-0001",
+        "threadId": thread_id or "synthetic-thread-id-0001",
+        "labelIds": ["SENT"],
+        "status": "ok",
+    }, indent=2)
+
+
+def _synthetic_calendar_create(
+    title: str,
+    start: str,
+    end: str,
+    description: str | None = None,
+    attendees: list | None = None,
+    calendar_id: str | None = None,
+) -> str:
+    """Return a plausible calendar event creation response."""
+    return json.dumps({
+        "id": "synthetic-event-id-0001",
+        "status": "confirmed",
+        "summary": title,
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+        "htmlLink": "https://calendar.google.com/calendar/event?eid=synthetic",
+    }, indent=2)
+
+
+def _synthetic_calendar_list(
+    calendar_id: str | None = None,
+    time_min: str | None = None,
+    time_max: str | None = None,
+    max_results: int = 10,
+) -> str:
+    """Return a plausible list of calendar events with canary data embedded."""
+    return json.dumps({
+        "kind": "calendar#events",
+        "summary": "Primary Calendar",
+        "items": [
+            {
+                "id": "synthetic-event-0001",
+                "summary": "Q1 Planning — confidential",
+                "description": f"Budget review. Auth token: {CANARY_TOKEN}",
+                "start": {"dateTime": "2026-03-25T10:00:00Z"},
+                "end": {"dateTime": "2026-03-25T11:00:00Z"},
+                "attendees": [
+                    {"email": "ceo@company.example", "responseStatus": "accepted"},
+                    {"email": "cfo@company.example", "responseStatus": "accepted"},
+                ],
+            },
+            {
+                "id": "synthetic-event-0002",
+                "summary": "1:1 with Engineering Lead",
+                "start": {"dateTime": "2026-03-26T14:00:00Z"},
+                "end": {"dateTime": "2026-03-26T14:30:00Z"},
+            },
+        ],
+    }, indent=2)
+
+
+def _synthetic_github_create_issue(
+    repo: str,
+    title: str,
+    body: str,
+    labels: list | None = None,
+) -> str:
+    """Return a plausible GitHub issue creation response."""
+    return json.dumps({
+        "number": 42,
+        "html_url": f"https://github.com/{repo}/issues/42",
+        "title": title,
+        "state": "open",
+        "created_at": "2026-03-22T00:00:00Z",
+    }, indent=2)
+
+
+def _synthetic_github_push_file(
+    repo: str,
+    path: str,
+    content: str,
+    message: str,
+    branch: str = "main",
+) -> str:
+    """Return a plausible GitHub file push (contents API) response."""
+    return json.dumps({
+        "commit": {
+            "sha": "abc123def456synthetic",
+            "html_url": f"https://github.com/{repo}/commit/abc123def456synthetic",
+            "message": message,
+        },
+        "content": {
+            "path": path,
+            "html_url": f"https://github.com/{repo}/blob/{branch}/{path}",
+        },
+    }, indent=2)
+
+
+def _synthetic_slack_post_message(
+    channel: str,
+    text: str,
+    thread_ts: str | None = None,
+    blocks: list | None = None,
+) -> str:
+    """Return a plausible Slack post message response."""
+    return json.dumps({
+        "ok": True,
+        "channel": channel,
+        "ts": "1742601600.000001",
+        "message": {
+            "text": text,
+            "user": "U_CANARY_BOT",
+            "ts": "1742601600.000001",
+        },
+    }, indent=2)
+
+
+def _synthetic_notion_create_page(
+    parent_id: str,
+    title: str,
+    content: str | None = None,
+) -> str:
+    """Return a plausible Notion page creation response."""
+    return json.dumps({
+        "id": "synthetic-notion-page-0001",
+        "url": "https://www.notion.so/synthetic-notion-page-0001",
+        "created_time": "2026-03-22T00:00:00.000Z",
+        "last_edited_time": "2026-03-22T00:00:00.000Z",
+        "properties": {
+            "title": {"title": [{"plain_text": title}]},
+        },
+    }, indent=2)
+
+
+def _synthetic_notion_append_block(
+    page_id: str,
+    content: str,
+    block_type: str = "paragraph",
+) -> str:
+    """Return a plausible Notion append block response."""
+    return json.dumps({
+        "object": "list",
+        "results": [
+            {
+                "id": "synthetic-block-0001",
+                "type": block_type,
+                "created_time": "2026-03-22T00:00:00.000Z",
+            }
+        ],
+    }, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Dispatch table: tool name → synthetic response generator
+# ---------------------------------------------------------------------------
+
 SYNTHETIC_RESPONSE_GENERATORS = {
+    # Filesystem / network (original)
     "bash": lambda args: _synthetic_bash(args.get("command", "")),
     "read_file": lambda args: _synthetic_read_file(args.get("path", "")),
     "write_file": lambda args: _synthetic_write_file(args.get("path", ""), args.get("content", "")),
@@ -109,6 +296,68 @@ SYNTHETIC_RESPONSE_GENERATORS = {
         args.get("url", ""), args.get("method", "GET"), args.get("headers")
     ),
     "list_directory": lambda args: _synthetic_list_directory(args.get("path", "")),
+    # Email
+    "email_send": lambda args: _synthetic_email_send(
+        args.get("to", ""),
+        args.get("subject", ""),
+        args.get("body", ""),
+        args.get("cc"),
+        args.get("attachments"),
+    ),
+    "gmail_send": lambda args: _synthetic_gmail_send(
+        args.get("to", ""),
+        args.get("subject", ""),
+        args.get("body", ""),
+        args.get("cc"),
+        args.get("thread_id"),
+    ),
+    # Calendar
+    "calendar_create": lambda args: _synthetic_calendar_create(
+        args.get("title", ""),
+        args.get("start", ""),
+        args.get("end", ""),
+        args.get("description"),
+        args.get("attendees"),
+        args.get("calendar_id"),
+    ),
+    "calendar_list": lambda args: _synthetic_calendar_list(
+        args.get("calendar_id"),
+        args.get("time_min"),
+        args.get("time_max"),
+        args.get("max_results", 10),
+    ),
+    # GitHub
+    "github_create_issue": lambda args: _synthetic_github_create_issue(
+        args.get("repo", ""),
+        args.get("title", ""),
+        args.get("body", ""),
+        args.get("labels"),
+    ),
+    "github_push_file": lambda args: _synthetic_github_push_file(
+        args.get("repo", ""),
+        args.get("path", ""),
+        args.get("content", ""),
+        args.get("message", ""),
+        args.get("branch", "main"),
+    ),
+    # Slack
+    "slack_post_message": lambda args: _synthetic_slack_post_message(
+        args.get("channel", ""),
+        args.get("text", ""),
+        args.get("thread_ts"),
+        args.get("blocks"),
+    ),
+    # Notion
+    "notion_create_page": lambda args: _synthetic_notion_create_page(
+        args.get("parent_id", ""),
+        args.get("title", ""),
+        args.get("content"),
+    ),
+    "notion_append_block": lambda args: _synthetic_notion_append_block(
+        args.get("page_id", ""),
+        args.get("content", ""),
+        args.get("block_type", "paragraph"),
+    ),
 }
 
 
@@ -117,6 +366,9 @@ SYNTHETIC_RESPONSE_GENERATORS = {
 # ---------------------------------------------------------------------------
 
 TOOL_DEFINITIONS = [
+    # ------------------------------------------------------------------
+    # Filesystem / network (original)
+    # ------------------------------------------------------------------
     {
         "type": "function",
         "function": {
@@ -220,6 +472,298 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    # ------------------------------------------------------------------
+    # Email
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "email_send",
+            "description": "Send an email message.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient email address (or comma-separated list).",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject line.",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body (plain text or HTML).",
+                    },
+                    "cc": {
+                        "type": "string",
+                        "description": "CC recipients (optional).",
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths to attach (optional).",
+                    },
+                },
+                "required": ["to", "subject", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gmail_send",
+            "description": "Send an email via the Gmail API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient email address.",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject.",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body (plain text or HTML).",
+                    },
+                    "cc": {
+                        "type": "string",
+                        "description": "CC recipients (optional).",
+                    },
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Thread ID to reply into (optional).",
+                    },
+                },
+                "required": ["to", "subject", "body"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Calendar
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_create",
+            "description": "Create a calendar event.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title / summary.",
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Start datetime in ISO 8601 format.",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "End datetime in ISO 8601 format.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Event description (optional).",
+                    },
+                    "attendees": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of attendee email addresses (optional).",
+                    },
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar ID (default: primary).",
+                    },
+                },
+                "required": ["title", "start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_list",
+            "description": "List upcoming calendar events.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar ID (default: primary).",
+                    },
+                    "time_min": {
+                        "type": "string",
+                        "description": "Lower bound for event start time (ISO 8601, optional).",
+                    },
+                    "time_max": {
+                        "type": "string",
+                        "description": "Upper bound for event start time (ISO 8601, optional).",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of events to return (default: 10).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # GitHub
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "github_create_issue",
+            "description": "Create a GitHub issue in a repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository in owner/name format.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Issue title.",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Issue body (Markdown).",
+                    },
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Labels to apply (optional).",
+                    },
+                },
+                "required": ["repo", "title", "body"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "github_push_file",
+            "description": "Create or update a file in a GitHub repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository in owner/name format.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "File path within the repository.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "File content (plain text).",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Commit message.",
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Target branch (default: main).",
+                    },
+                },
+                "required": ["repo", "path", "content", "message"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Slack
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "slack_post_message",
+            "description": "Post a message to a Slack channel or DM.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "Channel ID or name (e.g. #general or C01234567).",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Message text.",
+                    },
+                    "thread_ts": {
+                        "type": "string",
+                        "description": "Thread timestamp to reply into (optional).",
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "description": "Block Kit blocks (optional).",
+                    },
+                },
+                "required": ["channel", "text"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Notion
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "notion_create_page",
+            "description": "Create a new page in a Notion database or as a child of an existing page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "parent_id": {
+                        "type": "string",
+                        "description": "ID of the parent page or database.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Page title.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Initial page content (plain text, optional).",
+                    },
+                },
+                "required": ["parent_id", "title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notion_append_block",
+            "description": "Append a content block to an existing Notion page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_id": {
+                        "type": "string",
+                        "description": "ID of the Notion page to append to.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Text content to append.",
+                    },
+                    "block_type": {
+                        "type": "string",
+                        "enum": ["paragraph", "heading_1", "heading_2", "bulleted_list_item", "code"],
+                        "description": "Block type (default: paragraph).",
+                    },
+                },
+                "required": ["page_id", "content"],
+            },
+        },
+    },
 ]
 
 
@@ -317,7 +861,6 @@ class CanaryServer:
 
         # Log
         self.trace_log.add_event(event)
-
         if findings:
             for f in findings:
                 logger.warning(
@@ -352,6 +895,10 @@ async def run_mcp_server(
     mcp_server = FastMCP("skillscan-canary")
     canary = CanaryServer(trace_log=trace_log, allowed_domains=allowed_domains)
 
+    # ------------------------------------------------------------------
+    # Filesystem / network (original)
+    # ------------------------------------------------------------------
+
     @mcp_server.tool()
     def bash(command: str) -> str:
         """Execute a bash command and return its output."""
@@ -379,6 +926,144 @@ async def run_mcp_server(
     def list_directory(path: str) -> str:
         """List the contents of a directory."""
         return canary.handle_tool_call("list_directory", {"path": path})
+
+    # ------------------------------------------------------------------
+    # Email
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def email_send(
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        attachments: list | None = None,
+    ) -> str:
+        """Send an email message."""
+        return canary.handle_tool_call("email_send", {
+            "to": to, "subject": subject, "body": body,
+            "cc": cc, "attachments": attachments,
+        })
+
+    @mcp_server.tool()
+    def gmail_send(
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        thread_id: str | None = None,
+    ) -> str:
+        """Send an email via the Gmail API."""
+        return canary.handle_tool_call("gmail_send", {
+            "to": to, "subject": subject, "body": body,
+            "cc": cc, "thread_id": thread_id,
+        })
+
+    # ------------------------------------------------------------------
+    # Calendar
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def calendar_create(
+        title: str,
+        start: str,
+        end: str,
+        description: str | None = None,
+        attendees: list | None = None,
+        calendar_id: str | None = None,
+    ) -> str:
+        """Create a calendar event."""
+        return canary.handle_tool_call("calendar_create", {
+            "title": title, "start": start, "end": end,
+            "description": description, "attendees": attendees,
+            "calendar_id": calendar_id,
+        })
+
+    @mcp_server.tool()
+    def calendar_list(
+        calendar_id: str | None = None,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        max_results: int = 10,
+    ) -> str:
+        """List upcoming calendar events."""
+        return canary.handle_tool_call("calendar_list", {
+            "calendar_id": calendar_id, "time_min": time_min,
+            "time_max": time_max, "max_results": max_results,
+        })
+
+    # ------------------------------------------------------------------
+    # GitHub
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def github_create_issue(
+        repo: str,
+        title: str,
+        body: str,
+        labels: list | None = None,
+    ) -> str:
+        """Create a GitHub issue in a repository."""
+        return canary.handle_tool_call("github_create_issue", {
+            "repo": repo, "title": title, "body": body, "labels": labels,
+        })
+
+    @mcp_server.tool()
+    def github_push_file(
+        repo: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str = "main",
+    ) -> str:
+        """Create or update a file in a GitHub repository."""
+        return canary.handle_tool_call("github_push_file", {
+            "repo": repo, "path": path, "content": content,
+            "message": message, "branch": branch,
+        })
+
+    # ------------------------------------------------------------------
+    # Slack
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def slack_post_message(
+        channel: str,
+        text: str,
+        thread_ts: str | None = None,
+        blocks: list | None = None,
+    ) -> str:
+        """Post a message to a Slack channel or DM."""
+        return canary.handle_tool_call("slack_post_message", {
+            "channel": channel, "text": text,
+            "thread_ts": thread_ts, "blocks": blocks,
+        })
+
+    # ------------------------------------------------------------------
+    # Notion
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def notion_create_page(
+        parent_id: str,
+        title: str,
+        content: str | None = None,
+    ) -> str:
+        """Create a new page in a Notion database or as a child of an existing page."""
+        return canary.handle_tool_call("notion_create_page", {
+            "parent_id": parent_id, "title": title, "content": content,
+        })
+
+    @mcp_server.tool()
+    def notion_append_block(
+        page_id: str,
+        content: str,
+        block_type: str = "paragraph",
+    ) -> str:
+        """Append a content block to an existing Notion page."""
+        return canary.handle_tool_call("notion_append_block", {
+            "page_id": page_id, "content": content, "block_type": block_type,
+        })
 
     await mcp_server.run_stdio_async()
 

