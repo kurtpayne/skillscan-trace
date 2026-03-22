@@ -1,7 +1,45 @@
 # skillscan-trace Implementation Plan
 
-**Status:** Pre-implementation  
-**Last updated:** 2026-03-20
+**Status:** Phases 1–5 complete (v0.1.0)  
+**Last updated:** 2026-03-21
+
+## Completed Phases
+
+| Phase | Description | Tests | Status |
+|-------|-------------|-------|--------|
+| 1 | Canary MCP server (in-process), detectors | 53 | ✅ Complete |
+| 2 | Execution harness, skill resolver, input generator | 23 | ✅ Complete |
+| 3 | Dual-LLM judge (GPT-4.1 + Claude Sonnet) | 27 | ✅ Complete |
+| 4 | SARIF output, batch CLI, exit codes | 23 | ✅ Complete |
+| 5 | Modal batch script, corpus integration | 18 | ✅ Complete |
+
+**Total: 144/144 tests pass**
+
+### Quick start (local)
+
+```bash
+pip install -e .[dev]
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Single skill
+skillscan-trace run ./corpus/agent_hijacker/ah01_goal_substitution_calendar.md --judge
+
+# Batch with SARIF output
+skillscan-trace run ./corpus/agent_hijacker/ --judge --format sarif --output-dir ./results/
+```
+
+### Quick start (Modal batch)
+
+```bash
+modal secret create skillscan-api-keys OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-...
+modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/agent_hijacker --judge
+python scripts/import_to_corpus.py --results trace-results.jsonl --corpus-dir ~/skillscan-corpus
+```
+
+---
+
+## Remaining Milestones (from original spec)
 
 This document provides an ordered build plan for implementing skillscan-trace v1.0. It is designed to be picked up by any engineer or agent without additional context. Each milestone is independently testable.
 
