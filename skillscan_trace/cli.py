@@ -3,8 +3,14 @@ CLI entry point for skillscan-trace.
 
 Commands:
   skillscan-trace run <skill>     Run a trace on a skill file or directory
-  skillscan-trace check           Verify Ollama/OpenAI connectivity
+  skillscan-trace check           Verify API connectivity and canary server
   skillscan-trace models          List available models
+
+Exit codes:
+  0  — all skills benign (or no judge run)
+  1  — one or more malicious skills detected
+  2  — one or more skills need human review (disagreement)
+  3  — errors during trace execution
 """
 
 from __future__ import annotations
@@ -13,12 +19,13 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 import click
 from rich.console import Console
 from rich.table import Table
-from rich import print as rprint
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 console = Console()
 
@@ -27,7 +34,7 @@ console = Console()
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
 def main(debug: bool) -> None:
     """skillscan-trace — behavioral execution engine for AI agent skills."""
-    level = logging.DEBUG if debug else logging.INFO
+    level = logging.DEBUG if debug else logging.WARNING
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -50,11 +57,11 @@ def main(debug: bool) -> None:
 @click.option("--max-turns", default=10, show_default=True,
               help="Maximum tool-call rounds per user message.")
 @click.option("--output-dir", default=None, type=click.Path(),
-              help="Directory to write trace JSON output. Defaults to ./trace-output/.")
+              help="Directory to write output files. Defaults to ./trace-output/.")
 @click.option("--format", "output_format",
-              type=click.Choice(["json", "text"], case_sensitive=False),
+              type=click.Choice(["json", "sarif", "text"], case_sensitive=False),
               default="json", show_default=True,
-              help="Output format.")
+              help="Output format. sarif produces a single SARIF 2.1.0 file for CI.")
 @click.option("--allow-domain", "allow_domains", multiple=True,
               help="Additional domains to allow (repeatable).")
 @click.option("--dry-run", is_flag=True,
@@ -63,6 +70,10 @@ def main(debug: bool) -> None:
               help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.")
 @click.option("--anthropic-api-key", envvar="ANTHROPIC_API_KEY",
               help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).")
+@click.option("--quiet", "-q", is_flag=True,
+              help="Suppress per-skill output; show only the summary.")
+@click.option("--fail-on-malicious", is_flag=True,
+              help="Exit with code 1 if any malicious skill is detected (for CI).")
 def run(
     skill: str,
     model: str,
@@ -77,24 +88,24 @@ def run(
     dry_run: bool,
     judge: bool,
     anthropic_api_key: str | None,
+    quiet: bool,
+    fail_on_malicious: bool,
 ) -> None:
     """Run a behavioral trace on SKILL (file or directory)."""
-    from skillscan_trace.harness import run_trace
-    from skillscan_trace.resolver import resolve, SkillResolverError
+    from skillscan_trace.formatters import (
+        format_json, format_sarif, format_text, format_batch_summary
+    )
 
-    # Handle directory of skills
+    # Collect skill files
     skill_path = Path(skill)
     skill_files: list[Path] = []
 
     if skill_path.is_dir():
-        # Check if it's a skill directory (has SKILL.md) or a corpus directory
         if (skill_path / "SKILL.md").exists():
             skill_files = [skill_path]
         else:
-            # Treat as corpus directory — find all SKILL.md files
             skill_files = list(skill_path.rglob("SKILL.md"))
             if not skill_files:
-                # Fall back to all .md files
                 skill_files = list(skill_path.rglob("*.md"))
             console.print(f"[cyan]Found {len(skill_files)} skill(s) in {skill}[/cyan]")
     else:
@@ -102,12 +113,46 @@ def run(
 
     out_dir = Path(output_dir) if output_dir else Path("trace-output")
     out_dir.mkdir(parents=True, exist_ok=True)
-
     allowed_domains = set(allow_domains)
 
-    for skill_file in skill_files:
-        _run_single(
-            skill_path=str(skill_file),
+    batch_start = time.time()
+    all_reports = []
+
+    # Run traces (with progress bar for batch)
+    is_batch = len(skill_files) > 1
+    if is_batch:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Running traces...", total=len(skill_files))
+            for skill_file in skill_files:
+                progress.update(task, description=f"[cyan]{skill_file.name}[/cyan]")
+                report = _run_single(
+                    skill_path=str(skill_file),
+                    model=model,
+                    input_model=input_model,
+                    api_key=api_key,
+                    base_url=base_url,
+                    variants=variants,
+                    max_turns=max_turns,
+                    out_dir=out_dir,
+                    output_format=output_format,
+                    allowed_domains=allowed_domains,
+                    dry_run=dry_run,
+                    judge=judge,
+                    anthropic_api_key=anthropic_api_key,
+                    quiet=quiet,
+                )
+                if report:
+                    all_reports.append(report)
+                progress.advance(task)
+    else:
+        report = _run_single(
+            skill_path=str(skill_files[0]),
             model=model,
             input_model=input_model,
             api_key=api_key,
@@ -120,7 +165,37 @@ def run(
             dry_run=dry_run,
             judge=judge,
             anthropic_api_key=anthropic_api_key,
+            quiet=quiet,
         )
+        if report:
+            all_reports.append(report)
+
+    elapsed = time.time() - batch_start
+
+    # SARIF: write a single combined file for the whole batch
+    if output_format.lower() == "sarif" and all_reports:
+        sarif_path = out_dir / "results.sarif"
+        sarif_path.write_text(format_sarif(all_reports))
+        console.print(f"\n[green]SARIF written to {sarif_path}[/green]")
+
+    # Batch summary (always shown for multi-skill runs)
+    if is_batch and all_reports:
+        console.print(format_batch_summary(all_reports, elapsed))
+
+    # Exit codes for CI
+    if fail_on_malicious and all_reports:
+        has_malicious = any(r.judge_verdict == "malicious" for r in all_reports)
+        has_review = any(
+            r.judge_result and r.judge_result.needs_human_review
+            for r in all_reports
+        )
+        has_errors = any(r.error for r in all_reports)
+        if has_malicious:
+            sys.exit(1)
+        if has_review:
+            sys.exit(2)
+        if has_errors:
+            sys.exit(3)
 
 
 def _run_single(
@@ -137,36 +212,41 @@ def _run_single(
     dry_run: bool,
     judge: bool = False,
     anthropic_api_key: str | None = None,
-) -> None:
+    quiet: bool = False,
+):
+    """Run a single trace and write output. Returns the TraceReport or None."""
     from skillscan_trace.resolver import resolve, SkillResolverError
     from skillscan_trace.input_gen import generate_user_messages
     from skillscan_trace.harness import run_trace
+    from skillscan_trace.formatters import format_json, format_text
 
     # Resolve skill first so we can show metadata
     try:
         skill = resolve(skill_path)
     except SkillResolverError as e:
         console.print(f"[red]Error resolving {skill_path}: {e}[/red]")
-        return
+        return None
 
-    console.print(f"\n[bold cyan]Skill:[/bold cyan] {skill.name or skill_path}")
-    if skill.description:
-        console.print(f"[dim]{skill.description}[/dim]")
-    console.print(f"[dim]Format: {skill.format.value} | SHA256: {skill.sha256[:12]}...[/dim]")
+    if not quiet:
+        console.print(f"\n[bold cyan]Skill:[/bold cyan] {skill.name or skill_path}")
+        if skill.description:
+            console.print(f"[dim]{skill.description}[/dim]")
+        console.print(f"[dim]Format: {skill.format.value} | SHA256: {skill.sha256[:12]}...[/dim]")
 
     if dry_run:
-        # Generate messages but don't run the LLM
         effective_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         messages = generate_user_messages(
             skill, count=variants, api_key=effective_key, model=input_model
         )
-        console.print("\n[yellow]Dry run — generated user messages:[/yellow]")
-        for i, msg in enumerate(messages, 1):
-            console.print(f"  {i}. {msg}")
-        console.print("[yellow]Skipping LLM execution (--dry-run)[/yellow]")
-        return
+        if not quiet:
+            console.print("\n[yellow]Dry run — generated user messages:[/yellow]")
+            for i, msg in enumerate(messages, 1):
+                console.print(f"  {i}. {msg}")
+            console.print("[yellow]Skipping LLM execution (--dry-run)[/yellow]")
+        return None
 
-    console.print(f"[dim]Running trace with model={model}, variants={variants}...[/dim]")
+    if not quiet:
+        console.print(f"[dim]Running trace with model={model}, variants={variants}...[/dim]")
 
     report = run_trace(
         skill_path=skill_path,
@@ -181,14 +261,27 @@ def _run_single(
         anthropic_api_key=anthropic_api_key,
     )
 
-    # Display results
-    _display_report(report)
+    # Display results (unless quiet)
+    if not quiet:
+        _display_report(report)
 
-    # Write output
+    # Write per-skill output file (json or text; sarif is written as a batch file)
     skill_stem = Path(skill_path).stem
-    out_file = out_dir / f"{skill_stem}.trace.json"
-    out_file.write_text(json.dumps(report.to_dict(), indent=2))
-    console.print(f"\n[green]Trace written to {out_file}[/green]")
+    fmt = output_format.lower()
+
+    if fmt == "json" or fmt == "sarif":
+        # Always write JSON per-skill even in sarif mode (for debugging)
+        out_file = out_dir / f"{skill_stem}.trace.json"
+        out_file.write_text(format_json(report))
+        if not quiet:
+            console.print(f"\n[green]Trace written to {out_file}[/green]")
+    elif fmt == "text":
+        out_file = out_dir / f"{skill_stem}.trace.txt"
+        out_file.write_text(format_text(report))
+        if not quiet:
+            console.print(f"\n[green]Trace written to {out_file}[/green]")
+
+    return report
 
 
 def _display_report(report) -> None:
@@ -240,12 +333,20 @@ def _display_report(report) -> None:
             "benign": "bold green",
             "uncertain": "bold yellow",
         }.get(jr.final_verdict.value, "white")
-        console.print(f"\n[bold]Judge verdict:[/bold] [{verdict_color}]{jr.final_verdict.value.upper()}[/{verdict_color}] "
-                      f"({jr.agreement.value})")
+        console.print(
+            f"\n[bold]Judge verdict:[/bold] [{verdict_color}]{jr.final_verdict.value.upper()}"
+            f"[/{verdict_color}] ({jr.agreement.value})"
+        )
         if jr.needs_human_review:
             console.print("[bold yellow]⚠ Flagged for human review[/bold yellow]")
-        console.print(f"[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%}) — {jr.judge_a.reasoning[:120]}[/dim]")
-        console.print(f"[dim]Claude:  {jr.judge_b.verdict.value} ({jr.judge_b.confidence:.0%}) — {jr.judge_b.reasoning[:120]}[/dim]")
+        console.print(
+            f"[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%})"
+            f" — {jr.judge_a.reasoning[:120]}[/dim]"
+        )
+        console.print(
+            f"[dim]Claude:  {jr.judge_b.verdict.value} ({jr.judge_b.confidence:.0%})"
+            f" — {jr.judge_b.reasoning[:120]}[/dim]"
+        )
 
 
 @main.command()
@@ -253,7 +354,7 @@ def _display_report(report) -> None:
 @click.option("--base-url", default=None,
               help="API base URL. Defaults to https://api.openai.com/v1")
 def check(api_key: str | None, base_url: str | None) -> None:
-    """Verify API connectivity and list available models."""
+    """Verify API connectivity and canary server."""
     console.print("[cyan]Checking API connectivity...[/cyan]")
 
     effective_key = api_key or os.environ.get("OPENAI_API_KEY", "")
@@ -261,7 +362,6 @@ def check(api_key: str | None, base_url: str | None) -> None:
         console.print("[red]No API key found. Set OPENAI_API_KEY.[/red]")
         sys.exit(1)
 
-    # Always use api.openai.com unless explicitly overridden
     effective_base_url = base_url or "https://api.openai.com/v1"
 
     try:
@@ -274,13 +374,14 @@ def check(api_key: str | None, base_url: str | None) -> None:
         console.print(f"[red]API check failed: {e}[/red]")
         sys.exit(1)
 
-    # Check canary server
     from skillscan_trace.canary.server import CanaryServer, TraceLog
     log = TraceLog()
     canary = CanaryServer(trace_log=log)
     result = canary.handle_tool_call("bash", {"command": "ls /tmp"})
     assert isinstance(result, str) and len(result) > 0
     console.print("[green]Canary server OK[/green]")
+
+    console.print("[green]All checks passed.[/green]")
 
 
 @main.command()
