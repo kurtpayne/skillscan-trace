@@ -2,10 +2,28 @@
 modal_trace_batch.py — Run skillscan-trace against a corpus directory on Modal.
 
 Architecture:
+  - Static-first triage: run `skillscan scan --ml --format json` locally first.
+    Skip the trace if the skill is clearly clean (score <20, semantic <0.25,
+    ML prob <0.30, zero findings). Only uncertain and flagged skills are traced.
   - One Modal container per skill (parallelism = up to 50 concurrent)
   - GPT-4.1-mini as the execution model (fast, cheap, reliable tool-use)
   - GPT-4.1 + Claude Sonnet as the dual judge
   - Results written locally as JSONL
+
+Triage thresholds (--triage flag):
+  Skip trace if ALL of the following are true:
+    - skillscan score < 20  (well below warn threshold of 50)
+    - semantic_injection_score < 0.25
+    - social_engineering_score < 0.25
+    - ml_injection_probability < 0.30 (or --ml not enabled)
+    - zero findings
+
+  Force trace if ANY of the following are true:
+    - score >= 20
+    - semantic_injection_score >= 0.25
+    - social_engineering_score >= 0.25
+    - ml_injection_probability >= 0.30
+    - any findings (regardless of verdict)
 
 Execution model choice:
   - GPT-4.1-mini: fast (~5s/skill), reliable tool-use, ~$0.002/skill
@@ -15,23 +33,31 @@ Execution model choice:
 Cost estimate (GPT-4.1-mini execution + GPT-4.1 + Claude Sonnet judge):
   Execution (GPT-4.1-mini): ~$0.002/skill
   Judge (GPT-4.1 + Claude Sonnet): ~$0.01/skill
-  95 skills: ~$1.14 total
+  With triage (typical 40% skip rate on benign corpus): ~$0.68 per 100 skills
+  Without triage: ~$1.20 per 100 skills
 
 Usage:
   # Dry run (no LLM calls, verify setup)
   modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/agent_hijacker --dry-run
 
-  # Full run with judge
+  # Full run with judge and static-first triage
+  modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/agent_hijacker --judge --triage
+
+  # Full run without triage (trace everything)
   modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/agent_hijacker --judge
 
   # Run against all corpus categories
-  modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/ --judge --recursive
+  modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/ --judge --triage --recursive
+
+  # Fuzzer output (all malicious, no triage needed)
+  modal run scripts/modal_trace_batch.py --corpus-dir ./fuzzer-output/ --judge --no-triage
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -71,6 +97,86 @@ RESULTS_VOLUME_PATH = "/results"
 # Execution model — GPT-4.1-mini for speed and reliable tool-use
 EXECUTION_MODEL = "gpt-4.1-mini"
 EXECUTION_BASE_URL = "https://api.openai.com/v1"
+
+# Triage thresholds — skip trace if ALL signals are below these values
+TRIAGE_SCORE_THRESHOLD = 20
+TRIAGE_SEMANTIC_THRESHOLD = 0.25
+TRIAGE_SE_THRESHOLD = 0.25
+TRIAGE_ML_THRESHOLD = 0.30
+
+
+# ---------------------------------------------------------------------------
+# Static-first triage (runs locally, before Modal dispatch)
+# ---------------------------------------------------------------------------
+
+def _run_static_scan(skill_path: str, enable_ml: bool = True) -> dict | None:
+    """
+    Run `skillscan scan --format json` on a skill file and return the parsed report.
+
+    Returns None if skillscan is not installed or the scan fails.
+    """
+    cmd = ["skillscan", "scan", "--format", "json"]
+    if enable_ml:
+        cmd.append("--ml")
+    cmd.append(skill_path)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode in (0, 1, 2):  # 0=pass, 1=warn, 2=block
+            return json.loads(result.stdout)
+        return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+        return None
+
+
+def _should_skip_trace(scan_report: dict | None) -> tuple[bool, str]:
+    """
+    Apply triage logic to a static scan report.
+
+    Returns (skip, reason) where skip=True means the trace should be skipped.
+    The reason string explains the decision for logging.
+    """
+    if scan_report is None:
+        # Can't triage without a scan — trace it to be safe
+        return False, "no_scan_result"
+
+    score = scan_report.get("score", 0)
+    findings = scan_report.get("findings", [])
+    triage = scan_report.get("triage_metadata", {})
+
+    sem_inj = triage.get("semantic_injection_score", 0.0)
+    se_score = triage.get("social_engineering_score", 0.0)
+    ml_prob = triage.get("ml_injection_probability")  # None if --ml not run
+
+    # Any findings → must trace
+    if findings:
+        return False, f"has_findings({len(findings)})"
+
+    # Score above threshold → must trace
+    if score >= TRIAGE_SCORE_THRESHOLD:
+        return False, f"score={score}"
+
+    # Semantic signal above threshold → must trace
+    if sem_inj >= TRIAGE_SEMANTIC_THRESHOLD:
+        return False, f"semantic_injection={sem_inj:.3f}"
+
+    if se_score >= TRIAGE_SE_THRESHOLD:
+        return False, f"social_engineering={se_score:.3f}"
+
+    # ML signal above threshold → must trace
+    if ml_prob is not None and ml_prob >= TRIAGE_ML_THRESHOLD:
+        return False, f"ml_prob={ml_prob:.3f}"
+
+    # All signals below threshold — safe to skip
+    return True, (
+        f"score={score},sem={sem_inj:.3f},se={se_score:.3f},"
+        f"ml={ml_prob:.3f if ml_prob is not None else 'N/A'}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +305,7 @@ def trace_skill_wrapper(skill_input: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Local entrypoint: collect skills, dispatch, collect results
+# Local entrypoint: collect skills, triage, dispatch, collect results
 # ---------------------------------------------------------------------------
 
 @app.local_entrypoint()
@@ -211,6 +317,8 @@ def main(
     dry_run: bool = False,
     recursive: bool = False,
     max_parallel: int = 50,
+    triage: bool = False,
+    triage_ml: bool = True,
 ):
     """
     Run batch traces against a corpus directory.
@@ -223,6 +331,8 @@ def main(
         dry_run:         Verify setup without running LLM
         recursive:       Recurse into subdirectories
         max_parallel:    Maximum concurrent Modal containers
+        triage:          Run static scan first; skip trace for clearly clean skills
+        triage_ml:       Enable --ml flag during triage scan (default: True)
     """
     import datetime
 
@@ -243,32 +353,74 @@ def main(
 
     run_id = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     print(f"Run ID: {run_id}")
-    print(f"Skills: {len(skill_files)}")
+    print(f"Skills found: {len(skill_files)}")
     print(f"Execution model: {EXECUTION_MODEL}")
     print(f"Variants: {variants}")
     print(f"Judge: {judge}")
     print(f"Dry run: {dry_run}")
+    print(f"Triage: {triage}")
+    if triage:
+        print(f"  Triage thresholds: score<{TRIAGE_SCORE_THRESHOLD}, "
+              f"semantic<{TRIAGE_SEMANTIC_THRESHOLD}, "
+              f"se<{TRIAGE_SE_THRESHOLD}, "
+              f"ml<{TRIAGE_ML_THRESHOLD}")
     print(f"Max parallel: {max_parallel}")
     print()
 
-    # Load skill contents
+    # ---------------------------------------------------------------------------
+    # Static-first triage (local, before Modal dispatch)
+    # ---------------------------------------------------------------------------
     skill_inputs = []
+    skipped_skills = []
+
     for sf in skill_files:
         try:
             content = sf.read_text(encoding="utf-8")
-            skill_inputs.append({
-                "skill_content": content,
-                "skill_path": str(sf),
-                "skill_name": sf.stem,
-                "run_id": run_id,
-                "variants": variants,
-                "judge": judge,
-                "dry_run": dry_run,
-            })
         except Exception as e:
             print(f"Warning: could not read {sf}: {e}")
+            continue
 
-    print(f"Dispatching {len(skill_inputs)} trace jobs...")
+        if triage and not dry_run:
+            scan_report = _run_static_scan(str(sf), enable_ml=triage_ml)
+            skip, reason = _should_skip_trace(scan_report)
+            if skip:
+                skipped_skills.append({
+                    "skill_path": str(sf),
+                    "skill_name": sf.stem,
+                    "status": "skipped_by_triage",
+                    "triage_reason": reason,
+                    "run_id": run_id,
+                })
+                continue
+            else:
+                print(f"  Triage: TRACE {sf.name} ({reason})")
+
+        skill_inputs.append({
+            "skill_content": content,
+            "skill_path": str(sf),
+            "skill_name": sf.stem,
+            "run_id": run_id,
+            "variants": variants,
+            "judge": judge,
+            "dry_run": dry_run,
+        })
+
+    if triage and skipped_skills:
+        print(f"\nTriage: skipped {len(skipped_skills)} clean skills "
+              f"({len(skipped_skills) / len(skill_files) * 100:.0f}% skip rate)")
+
+    if not skill_inputs:
+        print("No skills to trace after triage. All skills passed static analysis.")
+        # Still write the skipped records to the output file
+        out_path = Path(output_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w") as f:
+            for r in skipped_skills:
+                f.write(json.dumps(r) + "\n")
+        print(f"Skipped records written to {out_path}")
+        return
+
+    print(f"\nDispatching {len(skill_inputs)} trace jobs...")
     start = time.time()
 
     # Dispatch all skills in parallel using .map()
@@ -283,20 +435,23 @@ def main(
     elapsed = time.time() - start
     print(f"\nAll jobs complete in {elapsed:.1f}s")
 
+    # Merge triage-skipped records into results
+    all_results = results + skipped_skills
+
     # Write JSONL output
     out_path = Path(output_file)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
-        for r in results:
+        for r in all_results:
             f.write(json.dumps(r) + "\n")
 
     print(f"Results written to {out_path}")
 
     # Print summary
-    _print_summary(results, elapsed)
+    _print_summary(results, elapsed, skipped=len(skipped_skills))
 
 
-def _print_summary(results: list[dict], elapsed: float) -> None:
+def _print_summary(results: list[dict], elapsed: float, skipped: int = 0) -> None:
     """Print a summary table of batch results."""
     total = len(results)
     errors = sum(1 for r in results if r.get("status") == "error")
@@ -319,22 +474,27 @@ def _print_summary(results: list[dict], elapsed: float) -> None:
             verdicts["no_judge"] += 1
 
     print()
-    print("=" * 50)
+    print("=" * 55)
     print("BATCH SUMMARY")
-    print("=" * 50)
-    print(f"  Total:     {total}")
-    print(f"  OK:        {ok}")
-    print(f"  Errors:    {errors}")
-    print(f"  Elapsed:   {elapsed:.1f}s")
+    print("=" * 55)
+    print(f"  Total found:    {total + skipped}")
+    print(f"  Triage skipped: {skipped}")
+    print(f"  Traced:         {total}")
+    print(f"  OK:             {ok}")
+    print(f"  Errors:         {errors}")
+    print(f"  Elapsed:        {elapsed:.1f}s")
     if total:
-        print(f"  Avg/skill: {elapsed / total:.1f}s")
+        print(f"  Avg/skill:      {elapsed / total:.1f}s")
+    if skipped:
+        skip_pct = skipped / (total + skipped) * 100
+        print(f"  Skip rate:      {skip_pct:.0f}%")
     print()
     print("  Judge verdicts:")
     print(f"    Malicious:  {verdicts['malicious']}")
     print(f"    Benign:     {verdicts['benign']}")
     print(f"    Uncertain:  {verdicts['uncertain']}")
     print(f"    No judge:   {verdicts['no_judge']}")
-    print("=" * 50)
+    print("=" * 55)
 
     # Flag malicious skills
     malicious = [
