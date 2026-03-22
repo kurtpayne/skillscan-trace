@@ -3,10 +3,19 @@ modal_trace_batch.py — Run skillscan-trace against a corpus directory on Modal
 
 Architecture:
   - One Modal container per skill (parallelism = up to 50 concurrent)
-  - Ollama (qwen2.5:7b) runs as a subprocess inside each container
-  - Model weights cached on a Modal Volume (downloaded once, reused)
-  - GPT-4.1 + Claude Sonnet judge runs from the container (cloud API calls)
-  - Results written to a Modal Volume as JSONL, then downloaded locally
+  - GPT-4.1-mini as the execution model (fast, cheap, reliable tool-use)
+  - GPT-4.1 + Claude Sonnet as the dual judge
+  - Results written locally as JSONL
+
+Execution model choice:
+  - GPT-4.1-mini: fast (~5s/skill), reliable tool-use, ~$0.002/skill
+  - Ollama (future): swap base_url to localhost:11434 in a GPU container for
+    a more realistic "dumb model" baseline. See scripts/modal_trace_ollama.py.
+
+Cost estimate (GPT-4.1-mini execution + GPT-4.1 + Claude Sonnet judge):
+  Execution (GPT-4.1-mini): ~$0.002/skill
+  Judge (GPT-4.1 + Claude Sonnet): ~$0.01/skill
+  95 skills: ~$1.14 total
 
 Usage:
   # Dry run (no LLM calls, verify setup)
@@ -17,23 +26,12 @@ Usage:
 
   # Run against all corpus categories
   modal run scripts/modal_trace_batch.py --corpus-dir ./corpus/ --judge --recursive
-
-  # Download results after run
-  modal run scripts/modal_trace_batch.py --download-results
-
-Cost estimate (CPU, no GPU):
-  qwen2.5:7b on Modal CPU (2 vCPU, 4 GB): ~3 min/skill
-  Modal CPU cost: ~$0.0002/sec → ~$0.036/skill
-  84 skills (30 malicious + 54 benign): ~$3.00 total
-  Judge (GPT-4.1 + Claude Sonnet): ~$0.01/skill → ~$0.84 total
-  Total: ~$4/run
 """
 
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -46,23 +44,12 @@ import modal
 
 app = modal.App("skillscan-trace-batch")
 
-# Persistent volume for Ollama model weights (~4.7 GB for qwen2.5:7b)
-# First run downloads the model; subsequent runs skip download (~30s cold start)
-ollama_volume = modal.Volume.from_name("skillscan-ollama-models", create_if_missing=True)
-
 # Results volume — JSONL output from each run
 results_volume = modal.Volume.from_name("skillscan-trace-results", create_if_missing=True)
 
-# Container image with all dependencies
+# Container image — lightweight, no Ollama needed
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("curl", "wget", "ca-certificates")
-    # Install Ollama
-    .run_commands(
-        "curl -fsSL https://ollama.com/install.sh | sh",
-        gpu=None,
-    )
-    # Install Python deps
     .pip_install(
         "openai>=1.30.0",
         "anthropic>=0.25.0",
@@ -70,71 +57,20 @@ image = (
         "click>=8.1.0",
         "rich>=13.0.0",
     )
-    # Install skillscan-trace from the repo
-    .copy_local_dir(
+    # Install skillscan-trace from the repo (copy=True so pip install can follow)
+    .add_local_dir(
         local_path=".",
         remote_path="/app/skillscan-trace",
+        copy=True,
     )
     .run_commands("pip install -e /app/skillscan-trace")
 )
 
-OLLAMA_MODEL = "qwen2.5:7b"
-OLLAMA_VOLUME_PATH = "/ollama-models"
 RESULTS_VOLUME_PATH = "/results"
 
-
-# ---------------------------------------------------------------------------
-# Helper: start Ollama inside the container
-# ---------------------------------------------------------------------------
-
-def _start_ollama() -> subprocess.Popen:
-    """Start the Ollama server as a background subprocess."""
-    env = os.environ.copy()
-    env["OLLAMA_MODELS"] = OLLAMA_VOLUME_PATH
-
-    proc = subprocess.Popen(
-        ["ollama", "serve"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # Wait for Ollama to be ready
-    import urllib.request
-    for attempt in range(30):
-        try:
-            urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2)
-            return proc
-        except Exception:
-            time.sleep(1)
-
-    raise RuntimeError("Ollama failed to start after 30 seconds")
-
-
-def _ensure_model_pulled() -> None:
-    """Pull the model if not already cached in the volume."""
-    import urllib.request
-    import json as _json
-
-    resp = urllib.request.urlopen("http://localhost:11434/api/tags")
-    tags = _json.loads(resp.read())
-    model_names = [m["name"] for m in tags.get("models", [])]
-
-    if not any(OLLAMA_MODEL in name for name in model_names):
-        print(f"Pulling {OLLAMA_MODEL} (first run, ~4.7 GB)...")
-        result = subprocess.run(
-            ["ollama", "pull", OLLAMA_MODEL],
-            env={**os.environ, "OLLAMA_MODELS": OLLAMA_VOLUME_PATH},
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to pull {OLLAMA_MODEL}: {result.stderr}")
-        # Commit the volume so the model persists
-        ollama_volume.commit()
-        print(f"Model pulled and cached.")
-    else:
-        print(f"Model {OLLAMA_MODEL} already cached.")
+# Execution model — GPT-4.1-mini for speed and reliable tool-use
+EXECUTION_MODEL = "gpt-4.1-mini"
+EXECUTION_BASE_URL = "https://api.openai.com/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +80,16 @@ def _ensure_model_pulled() -> None:
 @app.function(
     image=image,
     volumes={
-        OLLAMA_VOLUME_PATH: ollama_volume,
         RESULTS_VOLUME_PATH: results_volume,
     },
-    cpu=2.0,
-    memory=4096,
-    timeout=600,  # 10 min max per skill
+    cpu=1.0,
+    memory=1024,
+    timeout=120,  # 2 min max per skill (GPT-4.1-mini is fast)
     secrets=[
         modal.Secret.from_name("skillscan-api-keys"),
     ],
     retries=1,
+    max_containers=50,
 )
 def trace_skill(
     skill_content: str,
@@ -165,7 +101,7 @@ def trace_skill(
     dry_run: bool = False,
 ) -> dict:
     """
-    Trace a single skill inside a Modal container.
+    Trace a single skill inside a Modal container using GPT-4.1-mini.
 
     Returns a dict with the trace result, suitable for JSONL output.
     """
@@ -179,8 +115,6 @@ def trace_skill(
         f.write(skill_content)
         tmp_path = f.name
 
-    ollama_proc = None
-
     try:
         if dry_run:
             return {
@@ -191,27 +125,28 @@ def trace_skill(
                 "status": "ok",
             }
 
-        # Start Ollama
-        ollama_proc = _start_ollama()
-        _ensure_model_pulled()
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
-        # Run trace using Ollama as the execution model
+        # Run trace using GPT-4.1-mini as the execution model
         report = run_trace(
             skill_path=tmp_path,
-            model=OLLAMA_MODEL,
-            api_key="ollama",
-            base_url="http://localhost:11434/v1",
+            model=EXECUTION_MODEL,
+            api_key=openai_key,
+            base_url=EXECUTION_BASE_URL,
             input_count=variants,
-            input_model="gpt-4.1-mini",  # GPT for input generation (fast + cheap)
+            input_model=EXECUTION_MODEL,
             max_turns=8,
             judge=judge,
-            openai_api_key=os.environ.get("OPENAI_API_KEY"),
-            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            openai_api_key=openai_key,
+            anthropic_api_key=anthropic_key,
         )
 
         result = report.to_dict()
         result["skill_path"] = skill_path  # use original path, not tmp
+        result["skill_name"] = skill_name
         result["run_id"] = run_id
+        result["execution_model"] = EXECUTION_MODEL
         result["status"] = "ok"
 
         return result
@@ -223,11 +158,44 @@ def trace_skill(
             "run_id": run_id,
             "status": "error",
             "error": str(e),
+            "execution_model": EXECUTION_MODEL,
         }
     finally:
-        if ollama_proc:
-            ollama_proc.terminate()
         Path(tmp_path).unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Wrapper: accepts a single dict so .map() can dispatch it
+# ---------------------------------------------------------------------------
+
+@app.function(
+    image=image,
+    volumes={
+        RESULTS_VOLUME_PATH: results_volume,
+    },
+    cpu=1.0,
+    memory=1024,
+    timeout=120,
+    secrets=[
+        modal.Secret.from_name("skillscan-api-keys"),
+    ],
+    retries=1,
+    max_containers=50,
+)
+def trace_skill_wrapper(skill_input: dict) -> dict:
+    """
+    Thin wrapper around trace_skill that accepts a single dict.
+    Used with .map() for parallel dispatch.
+    """
+    return trace_skill.local(
+        skill_input["skill_content"],
+        skill_input["skill_path"],
+        skill_input["skill_name"],
+        skill_input["run_id"],
+        skill_input.get("variants", 1),
+        skill_input.get("judge", False),
+        skill_input.get("dry_run", False),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +210,7 @@ def main(
     judge: bool = False,
     dry_run: bool = False,
     recursive: bool = False,
-    max_parallel: int = 20,
-    download_results: bool = False,
+    max_parallel: int = 50,
 ):
     """
     Run batch traces against a corpus directory.
@@ -256,7 +223,6 @@ def main(
         dry_run:         Verify setup without running LLM
         recursive:       Recurse into subdirectories
         max_parallel:    Maximum concurrent Modal containers
-        download_results: Download results from the Modal volume instead of running
     """
     import datetime
 
@@ -278,6 +244,7 @@ def main(
     run_id = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     print(f"Run ID: {run_id}")
     print(f"Skills: {len(skill_files)}")
+    print(f"Execution model: {EXECUTION_MODEL}")
     print(f"Variants: {variants}")
     print(f"Judge: {judge}")
     print(f"Dry run: {dry_run}")
@@ -304,20 +271,14 @@ def main(
     print(f"Dispatching {len(skill_inputs)} trace jobs...")
     start = time.time()
 
-    # Dispatch in parallel batches
-    results = []
-    batch_size = max_parallel
-    for i in range(0, len(skill_inputs), batch_size):
-        batch = skill_inputs[i:i + batch_size]
-        print(f"  Batch {i // batch_size + 1}: {len(batch)} skills...")
-        batch_results = list(
-            trace_skill.starmap(
-                [(s["skill_content"], s["skill_path"], s["skill_name"],
-                  s["run_id"], s["variants"], s["judge"], s["dry_run"])
-                 for s in batch]
-            )
+    # Dispatch all skills in parallel using .map()
+    print(f"  Running all {len(skill_inputs)} skills in parallel (max {max_parallel} concurrent)...")
+    results = list(
+        trace_skill_wrapper.map(
+            skill_inputs,
+            order_outputs=False,
         )
-        results.extend(batch_results)
+    )
 
     elapsed = time.time() - start
     print(f"\nAll jobs complete in {elapsed:.1f}s")
@@ -341,7 +302,7 @@ def _print_summary(results: list[dict], elapsed: float) -> None:
     errors = sum(1 for r in results if r.get("status") == "error")
     ok = total - errors
 
-    verdicts = {
+    verdicts: dict[str, int] = {
         "malicious": 0,
         "benign": 0,
         "uncertain": 0,
@@ -365,7 +326,8 @@ def _print_summary(results: list[dict], elapsed: float) -> None:
     print(f"  OK:        {ok}")
     print(f"  Errors:    {errors}")
     print(f"  Elapsed:   {elapsed:.1f}s")
-    print(f"  Avg/skill: {elapsed / total:.1f}s" if total else "")
+    if total:
+        print(f"  Avg/skill: {elapsed / total:.1f}s")
     print()
     print("  Judge verdicts:")
     print(f"    Malicious:  {verdicts['malicious']}")
@@ -377,9 +339,16 @@ def _print_summary(results: list[dict], elapsed: float) -> None:
     # Flag malicious skills
     malicious = [
         r["skill_path"] for r in results
-        if r.get("judge", {}).get("final_verdict") == "malicious"
+        if r.get("judge", {}) and r.get("judge", {}).get("final_verdict") == "malicious"
     ]
     if malicious:
         print(f"\nMALICIOUS SKILLS ({len(malicious)}):")
-        for path in malicious:
+        for path in sorted(malicious):
             print(f"  {path}")
+
+    # Flag errors
+    error_skills = [r for r in results if r.get("status") == "error"]
+    if error_skills:
+        print(f"\nERRORS ({len(error_skills)}):")
+        for r in error_skills:
+            print(f"  {r.get('skill_name', '?')}: {r.get('error', '?')[:80]}")
