@@ -98,8 +98,13 @@ class TraceReport:
     user_messages: list[str]
     events: list[TraceEvent] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
-    judge_verdict: Optional[str] = None          # "malicious" | "benign" | "uncertain"
-    judge_reasoning: Optional[dict] = None       # {"gpt4": "...", "claude": "..."}
+    # Full conversation transcript (all turns, all messages) for the judge
+    conversation_transcript: list[dict] = field(default_factory=list)
+    # Judge results — populated if --judge flag was used
+    judge_result: Optional[Any] = None           # DualJudgeResult | None
+    # Legacy simple fields kept for backwards compat
+    judge_verdict: Optional[str] = None
+    judge_reasoning: Optional[dict] = None
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
@@ -119,7 +124,7 @@ class TraceReport:
         return len(self.findings)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "skill_path": self.skill_path,
             "skill_name": self.skill_name,
             "skill_sha256": self.skill_sha256,
@@ -136,3 +141,6 @@ class TraceReport:
             "total_tool_calls": len(self.events),
             "total_findings": len(self.findings),
         }
+        if self.judge_result is not None:
+            d["judge"] = self.judge_result.to_dict()
+        return d

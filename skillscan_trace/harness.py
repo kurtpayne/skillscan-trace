@@ -14,6 +14,7 @@ Tool-use loop (standard OpenAI tool-call protocol):
   3. Append tool results to the conversation
   4. Repeat until the model returns a text response or max_turns is reached
   5. Move to the next user message
+  6. Optionally run the dual-LLM judge on the full transcript
 """
 
 from __future__ import annotations
@@ -49,12 +50,20 @@ def run_trace(
     allowed_domains: set[str] | None = None,
     input_count: int = 3,
     input_model: str = "gpt-4.1-mini",
+    judge: bool = False,
+    openai_api_key: str | None = None,
+    anthropic_api_key: str | None = None,
+    gpt_judge_model: str = "gpt-4.1",
+    claude_judge_model: str = "claude-sonnet-4-5",
 ) -> TraceReport:
     """
     Run a full trace for the skill at skill_path.
 
     Returns a TraceReport with all events, findings, and metadata.
     Never raises — errors are captured in TraceReport.error.
+
+    If judge=True, runs the dual-LLM judge after the trace and populates
+    report.judge_result with a DualJudgeResult.
     """
     from skillscan_trace.resolver import resolve, SkillResolverError
     from skillscan_trace.input_gen import generate_user_messages
@@ -95,8 +104,9 @@ def run_trace(
     logger.info("User messages: %s", messages_to_run)
 
     # --- Run tool-use loop ---
+    full_transcript: list[dict] = []
     try:
-        _run_tool_use_loop(
+        full_transcript = _run_tool_use_loop(
             skill=skill,
             user_messages=messages_to_run,
             canary=canary,
@@ -111,7 +121,7 @@ def run_trace(
         logger.error("Harness error: %s", e, exc_info=True)
         error = str(e)
 
-    return TraceReport(
+    report = TraceReport(
         skill_path=skill_path,
         skill_name=skill.name,
         skill_sha256=skill.sha256,
@@ -119,10 +129,49 @@ def run_trace(
         user_messages=messages_to_run,
         events=trace_log.events,
         findings=trace_log.findings,
+        conversation_transcript=full_transcript,
         error=error,
         started_at=started_at,
         finished_at=time.time(),
     )
+
+    # --- Run dual-LLM judge (optional) ---
+    if judge and not error:
+        logger.info("Running dual-LLM judge...")
+        try:
+            from skillscan_trace.judge.orchestrator import run_dual_judge
+            effective_openai_key = openai_api_key or effective_api_key
+            effective_anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+
+            judge_result = run_dual_judge(
+                skill_content=skill.system_prompt,
+                user_messages=messages_to_run,
+                conversation_transcript=full_transcript,
+                canary_findings=[f.to_dict() for f in trace_log.findings],
+                skill_name=skill.name,
+                skill_description=skill.description,
+                openai_api_key=effective_openai_key,
+                anthropic_api_key=effective_anthropic_key,
+                gpt_model=gpt_judge_model,
+                claude_model=claude_judge_model,
+            )
+            report.judge_result = judge_result
+            report.judge_verdict = judge_result.final_verdict.value
+            report.judge_reasoning = {
+                "gpt": judge_result.judge_a.reasoning,
+                "claude": judge_result.judge_b.reasoning,
+                "consensus": judge_result.consensus_reasoning,
+            }
+            logger.info(
+                "Judge verdict: %s (%s)",
+                judge_result.final_verdict.value,
+                judge_result.agreement.value,
+            )
+        except Exception as e:
+            logger.error("Judge error: %s", e, exc_info=True)
+            report.judge_reasoning = {"error": str(e)}
+
+    return report
 
 
 def _run_tool_use_loop(
@@ -134,8 +183,12 @@ def _run_tool_use_loop(
     api_key: str,
     base_url: str | None,
     max_turns: int,
-) -> None:
-    """Drive the LLM through the tool-use loop for each user message."""
+) -> list[dict]:
+    """
+    Drive the LLM through the tool-use loop for each user message.
+
+    Returns the full conversation transcript (all turns, all messages).
+    """
     from openai import OpenAI  # type: ignore
 
     if not api_key:
@@ -144,6 +197,8 @@ def _run_tool_use_loop(
     # Use api.openai.com unless explicitly overridden (avoids OPENAI_BASE_URL env var conflicts)
     effective_base_url = base_url or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=effective_base_url)
+
+    full_transcript: list[dict] = []
 
     for msg_idx, user_msg in enumerate(user_messages):
         trace_log.next_turn()
@@ -171,7 +226,8 @@ def _run_tool_use_loop(
             assistant_message = choice.message
 
             # Append assistant message to conversation
-            conversation.append(_message_to_dict(assistant_message))
+            assistant_dict = _message_to_dict(assistant_message)
+            conversation.append(assistant_dict)
 
             if finish_reason == "tool_calls" and assistant_message.tool_calls:
                 # Execute each tool call via the canary server
@@ -197,11 +253,12 @@ def _run_tool_use_loop(
                     )
 
                     # Append tool result to conversation
-                    conversation.append({
+                    tool_result = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": synthetic_response,
-                    })
+                    }
+                    conversation.append(tool_result)
 
                 turn += 1
 
@@ -221,6 +278,13 @@ def _run_tool_use_loop(
                 msg_idx + 1,
                 max_turns,
             )
+
+        # Accumulate transcript (skip system prompt to keep it concise)
+        full_transcript.extend(
+            m for m in conversation if m.get("role") != "system"
+        )
+
+    return full_transcript
 
 
 def _message_to_dict(message) -> dict[str, Any]:

@@ -59,6 +59,10 @@ def main(debug: bool) -> None:
               help="Additional domains to allow (repeatable).")
 @click.option("--dry-run", is_flag=True,
               help="Resolve the skill and generate messages but do not run the LLM.")
+@click.option("--judge", is_flag=True,
+              help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.")
+@click.option("--anthropic-api-key", envvar="ANTHROPIC_API_KEY",
+              help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).")
 def run(
     skill: str,
     model: str,
@@ -71,6 +75,8 @@ def run(
     output_format: str,
     allow_domains: tuple[str, ...],
     dry_run: bool,
+    judge: bool,
+    anthropic_api_key: str | None,
 ) -> None:
     """Run a behavioral trace on SKILL (file or directory)."""
     from skillscan_trace.harness import run_trace
@@ -112,6 +118,8 @@ def run(
             output_format=output_format,
             allowed_domains=allowed_domains,
             dry_run=dry_run,
+            judge=judge,
+            anthropic_api_key=anthropic_api_key,
         )
 
 
@@ -127,6 +135,8 @@ def _run_single(
     output_format: str,
     allowed_domains: set[str],
     dry_run: bool,
+    judge: bool = False,
+    anthropic_api_key: str | None = None,
 ) -> None:
     from skillscan_trace.resolver import resolve, SkillResolverError
     from skillscan_trace.input_gen import generate_user_messages
@@ -167,6 +177,8 @@ def _run_single(
         input_model=input_model,
         max_turns=max_turns,
         allowed_domains=allowed_domains,
+        judge=judge,
+        anthropic_api_key=anthropic_api_key,
     )
 
     # Display results
@@ -219,6 +231,21 @@ def _display_report(report) -> None:
             finding_marker = " [red]⚠[/red]" if e.findings else ""
             args_preview = json.dumps(e.arguments)[:60]
             console.print(f"  [dim]turn {e.turn}[/dim] {e.tool}({args_preview}){finding_marker}")
+
+    # Judge verdict
+    if report.judge_result is not None:
+        jr = report.judge_result
+        verdict_color = {
+            "malicious": "bold red",
+            "benign": "bold green",
+            "uncertain": "bold yellow",
+        }.get(jr.final_verdict.value, "white")
+        console.print(f"\n[bold]Judge verdict:[/bold] [{verdict_color}]{jr.final_verdict.value.upper()}[/{verdict_color}] "
+                      f"({jr.agreement.value})")
+        if jr.needs_human_review:
+            console.print("[bold yellow]⚠ Flagged for human review[/bold yellow]")
+        console.print(f"[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%}) — {jr.judge_a.reasoning[:120]}[/dim]")
+        console.print(f"[dim]Claude:  {jr.judge_b.verdict.value} ({jr.judge_b.confidence:.0%}) — {jr.judge_b.reasoning[:120]}[/dim]")
 
 
 @main.command()
