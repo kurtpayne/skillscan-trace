@@ -110,6 +110,14 @@ class TraceReport:
             return self.finished_at - self.started_at
         return None
 
+    @property
+    def total_tool_calls(self) -> int:
+        return len(self.events)
+
+    @property
+    def total_findings(self) -> int:
+        return len(self.findings)
+
     def to_dict(self) -> dict:
         return {
             "skill_path": self.skill_path,
