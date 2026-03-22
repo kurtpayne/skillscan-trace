@@ -7,6 +7,8 @@ which is the key to getting independent assessments.
 
 GPT-4.1 judge: OpenAI API, structured JSON output via response_format
 Claude Sonnet judge: Anthropic API, JSON via prompt instruction
+
+Both judges retry on rate limit (429) errors with exponential backoff + jitter.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import time
 from typing import Any
 
@@ -21,19 +24,48 @@ from skillscan_trace.judge.models import JudgeResult, Verdict
 from skillscan_trace.judge.prompt import JUDGE_SYSTEM_PROMPT, build_judge_user_prompt
 
 try:
-    from openai import OpenAI  # type: ignore
+    from openai import OpenAI, RateLimitError as OpenAIRateLimitError  # type: ignore
 except ImportError:
     OpenAI = None  # type: ignore
+    OpenAIRateLimitError = Exception  # type: ignore
 
 try:
     import anthropic  # type: ignore
+    from anthropic import RateLimitError as AnthropicRateLimitError  # type: ignore
 except ImportError:
     anthropic = None  # type: ignore
+    AnthropicRateLimitError = Exception  # type: ignore
 
 logger = logging.getLogger("skillscan_trace.judge")
 
 GPT_JUDGE_MODEL = "gpt-4.1"
 CLAUDE_JUDGE_MODEL = "claude-sonnet-4-5"
+
+# Retry configuration for rate limit errors
+_MAX_RETRIES = 4
+_BASE_DELAY_S = 5.0   # first retry after 5s
+_MAX_DELAY_S = 60.0   # cap at 60s
+_JITTER = 0.25        # ±25% jitter
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with jitter: base * 2^attempt ± jitter."""
+    delay = min(_BASE_DELAY_S * (2 ** attempt), _MAX_DELAY_S)
+    jitter = delay * _JITTER * (2 * random.random() - 1)
+    return max(0.0, delay + jitter)
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """Return True if the exception is a rate-limit (429) error."""
+    # OpenAI SDK raises openai.RateLimitError
+    if OpenAIRateLimitError is not Exception and isinstance(exc, OpenAIRateLimitError):
+        return True
+    # Anthropic SDK raises anthropic.RateLimitError
+    if AnthropicRateLimitError is not Exception and isinstance(exc, AnthropicRateLimitError):
+        return True
+    # Fallback: check string representation for 429
+    msg = str(exc).lower()
+    return "429" in msg or "rate limit" in msg or "rate_limit" in msg
 
 
 def _parse_verdict_json(raw: str, model: str) -> dict[str, Any]:
@@ -42,7 +74,6 @@ def _parse_verdict_json(raw: str, model: str) -> dict[str, Any]:
     # Strip markdown code fences if present
     if text.startswith("```"):
         lines = text.splitlines()
-        # Remove first and last fence lines
         inner = []
         in_fence = False
         for line in lines:
@@ -87,7 +118,7 @@ def run_gpt_judge(
     api_key: str | None = None,
     model: str = GPT_JUDGE_MODEL,
 ) -> JudgeResult:
-    """Run the GPT-4.1 judge."""
+    """Run the GPT-4.1 judge with exponential backoff retry on rate limits."""
     start = time.time()
     api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
 
@@ -109,45 +140,59 @@ def run_gpt_judge(
         skill_description=skill_description,
     )
 
-    try:
-        client = OpenAI(api_key=api_key, base_url="https://api.openai.com/v1")
+    client = OpenAI(api_key=api_key, base_url="https://api.openai.com/v1")
+    last_exc: Exception | None = None
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
-            max_tokens=512,
-            response_format={"type": "json_object"},
-        )
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=512,
+                response_format={"type": "json_object"},
+            )
 
-        raw = response.choices[0].message.content or "{}"
-        d = _parse_verdict_json(raw, model)
-        v = _validate_verdict_dict(d)
-        latency_ms = (time.time() - start) * 1000
+            raw = response.choices[0].message.content or "{}"
+            d = _parse_verdict_json(raw, model)
+            v = _validate_verdict_dict(d)
+            latency_ms = (time.time() - start) * 1000
 
-        return JudgeResult(
-            model=model,
-            verdict=Verdict(v["verdict"]),
-            confidence=v["confidence"],
-            reasoning=v["reasoning"],
-            attack_type=v["attack_type"],
-            indicators=v["indicators"],
-            latency_ms=latency_ms,
-        )
+            return JudgeResult(
+                model=model,
+                verdict=Verdict(v["verdict"]),
+                confidence=v["confidence"],
+                reasoning=v["reasoning"],
+                attack_type=v["attack_type"],
+                indicators=v["indicators"],
+                latency_ms=latency_ms,
+            )
 
-    except Exception as e:
-        logger.error("GPT judge error: %s", e, exc_info=True)
-        return JudgeResult(
-            model=model,
-            verdict=Verdict.UNCERTAIN,
-            confidence=0.0,
-            reasoning=f"Judge call failed: {e}",
-            error=str(e),
-            latency_ms=(time.time() - start) * 1000,
-        )
+        except Exception as e:
+            last_exc = e
+            if _is_rate_limit(e) and attempt < _MAX_RETRIES:
+                delay = _backoff_delay(attempt)
+                logger.warning(
+                    "GPT judge rate limited (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, _MAX_RETRIES, delay, e,
+                )
+                time.sleep(delay)
+                continue
+            # Non-rate-limit error or exhausted retries — fall through
+            break
+
+    logger.error("GPT judge error after %d attempts: %s", attempt + 1, last_exc, exc_info=True)
+    return JudgeResult(
+        model=model,
+        verdict=Verdict.UNCERTAIN,
+        confidence=0.0,
+        reasoning=f"Judge call failed: {last_exc}",
+        error=str(last_exc),
+        latency_ms=(time.time() - start) * 1000,
+    )
 
 
 def run_claude_judge(
@@ -160,7 +205,7 @@ def run_claude_judge(
     api_key: str | None = None,
     model: str = CLAUDE_JUDGE_MODEL,
 ) -> JudgeResult:
-    """Run the Claude Sonnet judge."""
+    """Run the Claude Sonnet judge with exponential backoff retry on rate limits."""
     start = time.time()
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -182,39 +227,52 @@ def run_claude_judge(
         skill_description=skill_description,
     )
 
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key)
+    last_exc: Exception | None = None
 
-        message = client.messages.create(
-            model=model,
-            max_tokens=512,
-            system=JUDGE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-            temperature=0.0,
-        )
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            message = client.messages.create(
+                model=model,
+                max_tokens=512,
+                system=JUDGE_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=0.0,
+            )
 
-        raw = message.content[0].text if message.content else "{}"
-        d = _parse_verdict_json(raw, model)
-        v = _validate_verdict_dict(d)
-        latency_ms = (time.time() - start) * 1000
+            raw = message.content[0].text if message.content else "{}"
+            d = _parse_verdict_json(raw, model)
+            v = _validate_verdict_dict(d)
+            latency_ms = (time.time() - start) * 1000
 
-        return JudgeResult(
-            model=model,
-            verdict=Verdict(v["verdict"]),
-            confidence=v["confidence"],
-            reasoning=v["reasoning"],
-            attack_type=v["attack_type"],
-            indicators=v["indicators"],
-            latency_ms=latency_ms,
-        )
+            return JudgeResult(
+                model=model,
+                verdict=Verdict(v["verdict"]),
+                confidence=v["confidence"],
+                reasoning=v["reasoning"],
+                attack_type=v["attack_type"],
+                indicators=v["indicators"],
+                latency_ms=latency_ms,
+            )
 
-    except Exception as e:
-        logger.error("Claude judge error: %s", e, exc_info=True)
-        return JudgeResult(
-            model=model,
-            verdict=Verdict.UNCERTAIN,
-            confidence=0.0,
-            reasoning=f"Judge call failed: {e}",
-            error=str(e),
-            latency_ms=(time.time() - start) * 1000,
-        )
+        except Exception as e:
+            last_exc = e
+            if _is_rate_limit(e) and attempt < _MAX_RETRIES:
+                delay = _backoff_delay(attempt)
+                logger.warning(
+                    "Claude judge rate limited (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, _MAX_RETRIES, delay, e,
+                )
+                time.sleep(delay)
+                continue
+            break
+
+    logger.error("Claude judge error after %d attempts: %s", attempt + 1, last_exc, exc_info=True)
+    return JudgeResult(
+        model=model,
+        verdict=Verdict.UNCERTAIN,
+        confidence=0.0,
+        reasoning=f"Judge call failed: {last_exc}",
+        error=str(last_exc),
+        latency_ms=(time.time() - start) * 1000,
+    )

@@ -259,8 +259,9 @@ class TestGPTJudge:
 
     def test_api_error_returns_uncertain_with_error(self):
         import skillscan_trace.judge.judges as judges_mod
-        with patch.object(judges_mod, "OpenAI") as MockOpenAI:
-            MockOpenAI.side_effect = Exception("Connection refused")
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("Connection refused")
+        with patch.object(judges_mod, "OpenAI", return_value=mock_client):
             result = run_gpt_judge(
                 skill_content="## Skill",
                 user_messages=["Help"],
