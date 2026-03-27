@@ -20,12 +20,31 @@ When you run `skillscan-trace run ./skill.md`, the following happens entirely on
 
 Your API key is passed directly to the LLM provider you chose. It is not:
 
-- Stored by skillscan-trace (it is read from your environment variable or `--api-key` flag and used only for the duration of the run)
+- Stored by skillscan-trace (it is read from your `.env` file, environment variable, or `--api-key` flag and used only for the duration of the run)
 - Transmitted to any SkillScan server (there is no SkillScan server in local mode)
 - Logged to disk (the trace report does not include your API key)
 - Shared with any third party other than the LLM provider you selected
 
 If you use `--provider openrouter`, your key goes to [OpenRouter](https://openrouter.ai). If you use `--provider openai`, it goes to [OpenAI](https://openai.com). If you use `--provider ollama`, no key is required and no network request is made to any external service.
+
+### Storing keys in .env
+
+skillscan-trace reads a `.env` file automatically from the current directory and all parent directories (nearest file wins). This is the recommended way to store API keys:
+
+```
+# .env  — add this file to .gitignore, never commit it
+OPENAI_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...
+ANTHROPIC_API_KEY=sk-ant-...   # only needed when --judge is enabled
+```
+
+Priority order (highest wins):
+1. `--api-key` CLI flag
+2. Shell environment variable (`export OPENAI_API_KEY=...`)
+3. `.env` file in the current or nearest ancestor directory
+4. `skillscan-trace.yaml` config file (API keys are **not** supported here — use `.env` instead)
+
+The `.env` file is loaded with `override=False`, meaning shell variables you have already exported always take precedence over `.env` values. If no `.env` file is found, skillscan-trace falls back to the shell environment silently.
 
 ---
 
@@ -71,5 +90,6 @@ They do not contain your API key, your system's real credential files, or any da
 | Canary credential values | Your machine only (in-process canary server) |
 | Trace report | Your local filesystem only |
 | Your real credential files | Not accessed (canary uses synthetic files) |
+| `.env` file contents | Your machine only (never transmitted) |
 
 If you have questions or concerns about data handling, open an issue at [github.com/kurtpayne/skillscan-trace](https://github.com/kurtpayne/skillscan-trace/issues).

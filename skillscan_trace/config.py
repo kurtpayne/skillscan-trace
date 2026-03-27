@@ -6,12 +6,21 @@ directory and all parent directories up to the filesystem root, then merges
 with environment variables and CLI flags.
 
 Priority (highest to lowest):
-  1. Explicit CLI flags
-  2. Environment variables (OPENAI_API_KEY, OPENROUTER_API_KEY, etc.)
-  3. skillscan-trace.yaml in the nearest ancestor directory
-  4. Built-in defaults
+  1. Explicit CLI flags (--api-key, --provider, …)
+  2. Environment variables already set in the shell
+  3. .env file in the nearest ancestor directory (loaded by cli.py at startup)
+  4. skillscan-trace.yaml in the nearest ancestor directory
+  5. Built-in defaults
 
-Example config file:
+API keys must NOT be placed in the YAML config file.  Store them in .env or
+export them as shell environment variables:
+
+  # .env  (add to .gitignore — never commit this file)
+  OPENAI_API_KEY=sk-...
+  OPENROUTER_API_KEY=sk-or-...
+  ANTHROPIC_API_KEY=sk-ant-...
+
+Example config file (no api_key field):
   # skillscan-trace.yaml
   provider: openrouter
   model: anthropic/claude-3.5-sonnet
@@ -37,12 +46,13 @@ import yaml
 
 CONFIG_FILENAMES = ("skillscan-trace.yaml", ".skillscan-trace.yaml", "skillscan-trace.yml")
 
-# Keys that are valid in the config file and their expected types
+# Keys that are valid in the config file and their expected types.
+# NOTE: api_key is intentionally absent — store API keys in .env or as shell
+# environment variables, never in a YAML file that might be committed.
 CONFIG_KEYS: dict[str, type] = {
     "provider": str,
     "model": str,
     "input_model": str,
-    "api_key": str,
     "base_url": str,
     "variants": int,
     "max_turns": int,
@@ -94,6 +104,15 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
     validated: dict[str, Any] = {}
     unknown = []
     for key, value in raw.items():
+        if key == "api_key":
+            import warnings
+            warnings.warn(
+                f"{path}: 'api_key' in config file is not supported and will be ignored. "
+                "Store your API key in a .env file (OPENAI_API_KEY=...) or export it as a "
+                "shell environment variable. See PRIVACY.md for details.",
+                stacklevel=2,
+            )
+            continue
         if key not in CONFIG_KEYS:
             unknown.append(key)
             continue

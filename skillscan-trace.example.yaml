@@ -1,4 +1,4 @@
-# skillscan-trace.yaml — project-level configuration
+# skillscan-trace.yaml
 #
 # Copy this file to skillscan-trace.yaml (or .skillscan-trace.yaml) in your
 # project root. CLI flags always override these values.
@@ -6,6 +6,18 @@
 # Config file lookup: skillscan-trace searches the current directory and all
 # parent directories for skillscan-trace.yaml or .skillscan-trace.yaml.
 # The nearest file wins, so you can have per-project configs.
+#
+# ── API keys ──────────────────────────────────────────────────────────────────
+# API keys must NOT be placed in this file. Store them in a .env file instead:
+#
+#   # .env  (add .env to .gitignore — never commit it)
+#   OPENAI_API_KEY=sk-...
+#   OPENROUTER_API_KEY=sk-or-...
+#   ANTHROPIC_API_KEY=sk-ant-...   # only needed when judge: true
+#
+# skillscan-trace auto-discovers .env from the current directory and all
+# parent directories. Shell environment variables always take precedence.
+# Priority: CLI flag > shell env var > .env file > this config file.
 
 # ── Provider ──────────────────────────────────────────────────────────────────
 # Shortcut for common providers. Sets base_url and reads the right env var.

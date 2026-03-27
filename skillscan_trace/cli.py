@@ -32,6 +32,30 @@ from skillscan_trace.config import load_config, merge_config
 console = Console()
 
 
+def _load_dotenv() -> None:
+    """Load .env from cwd and all parent directories (nearest wins).
+
+    Priority order for API keys:
+      1. CLI flag (--api-key)
+      2. Environment variable already set in the shell
+      3. .env file (this function)
+      4. Config file (skillscan-trace.yaml)
+
+    Keys are never written to the config file — use .env or export them.
+    """
+    try:
+        from dotenv import load_dotenv, find_dotenv  # type: ignore[import]
+    except ImportError:
+        return  # python-dotenv not installed — silently skip
+
+    # find_dotenv walks up from cwd looking for a .env file
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        # override=False: existing shell env vars always win over .env
+        load_dotenv(dotenv_path, override=False)
+        logging.getLogger(__name__).debug("Loaded .env from %s", dotenv_path)
+
+
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
 @click.option("--config", "config_path", default=None, type=click.Path(exists=True),
@@ -45,6 +69,9 @@ def main(ctx: click.Context, debug: bool, config_path: str | None) -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         stream=sys.stderr,
     )
+    # Load .env before config so env vars are available for provider resolution.
+    # Shell env vars always take precedence over .env values.
+    _load_dotenv()
     ctx.ensure_object(dict)
     try:
         cfg = load_config(Path(config_path) if config_path else None)
