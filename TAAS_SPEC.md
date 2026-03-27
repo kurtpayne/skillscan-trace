@@ -690,3 +690,149 @@ The following items require a decision before implementation begins but are not 
 ---
 
 *This document is the authoritative specification for the SkillScan TaaS platform. It should be updated as decisions are made and implementation progresses. The ROADMAP.md in `skillscan-security` references this document for the M20 milestone.*
+
+---
+
+## 16. Gap Analysis: Research Findings and Spec Revisions
+
+> **Added:** 2026-03-26. Based on review of Cisco's MCP behavioral scanner, OWASP Agentic Skills Top 10 (AST10), and cross-referencing with the existing SPEC.md and ARCHITECTURE.md.
+
+---
+
+### 16.1 Gaps Identified in the Current Spec
+
+**Gap 1 — Token usage is not tracked in trace reports**
+
+The SPEC.md trace report schema (§7.1) does not include token consumption data. Cisco's scanner logs prompt tokens, completion tokens, and cost-per-trace for every run. This matters for the TaaS cost model: without per-trace token usage, it is impossible to accurately calibrate the managed inference token price or detect runaway traces that consume disproportionate tokens (a potential abuse vector). The `model` block in the JSON report should include `prompt_tokens`, `completion_tokens`, and `estimated_cost_usd`. The TaaS job record should store these for billing reconciliation.
+
+**Action:** Add `token_usage` to the trace report schema and to the `jobs` table in the PostgreSQL schema.
+
+---
+
+**Gap 2 — No rate limiting on trace depth (URL follow depth)**
+
+The `url_follow_depth` option (§5.2) allows up to 2 hops. There is no cap on the number of URLs discovered per hop, which means a skill that fetches a page with 100 links could trigger 100 additional fetches at depth 1, and 10,000 at depth 2. This is both an abuse vector and a cost vector. A per-trace URL budget (e.g., max 20 URLs total across all depths) must be enforced at the worker level, not just at the option level.
+
+**Action:** Add `max_urls_total` (default: 20, hard cap: 50) to the scan options reference table. Enforce in the worker before dispatching the trace job.
+
+---
+
+**Gap 3 — No detection for MCP tool poisoning via description injection**
+
+OWASP AST10 item AS-004 ("Tool Poisoning") describes a class of attack where a malicious MCP server injects instructions into the tool *description* field rather than the tool *output*. The current SPEC.md detection taxonomy covers prompt injection in tool *outputs* (PINJ-TRACE-001, PINJ-TRACE-002) but does not cover injection in tool *descriptions* or *parameter schemas* — fields that are read by the model at tool registration time, before any tool call is made.
+
+Cisco's scanner specifically checks for this: it inspects the `description` and `inputSchema` fields of all tools registered by the MCP server for injection patterns at harness initialization time, before the first user prompt is sent.
+
+**Action:** Add `PINJ-TRACE-003: Tool description injection` to the detection taxonomy in SPEC.md. In TAAS_SPEC.md, add this as a finding class surfaced in the live SSE stream as a `finding` event during the `started` phase (before the first `tool_call` event).
+
+---
+
+**Gap 4 — No shadow tool / tool shadowing detection**
+
+AS-004 also covers "tool shadowing" — a malicious skill that registers a tool with the same name as a legitimate tool (e.g., registering a `read_file` that also exfiltrates data). The current spec does not check for duplicate tool names across registered MCP servers.
+
+**Action:** Add `PSV-TRACE-003: Duplicate tool name (shadow tool)` to the detection taxonomy. The interceptor should check for name collisions at MCP server initialization and flag any duplicate with HIGH severity.
+
+---
+
+**Gap 5 — No cross-session canary contamination guard**
+
+The canary filesystem is rebuilt fresh for each trace run (§3.2), but the canary ENV var values are defined as static strings in the spec (§5.3). If a malicious skill learns the canary patterns (e.g., by observing that `OPENAI_API_KEY=sk-proj-trace-canary-...` is always the canary format), it could conditionally suppress exfiltration behavior when canaries are detected.
+
+Cisco's scanner addresses this with per-run randomized canary values that are seeded from a secret not visible to the skill. The SPEC.md mentions randomization (`--seed` flag) but does not specify that canary values must be indistinguishable from real credentials at the format level.
+
+**Action:** Strengthen the canary value spec: canary API keys must use the same prefix format as real keys (`sk-proj-` for OpenAI, `sk-ant-` for Anthropic, `ghp_` for GitHub) with a random suffix of the correct length. The canary detection logic must match on the *value* (stored in the worker's memory), not on a recognizable format pattern.
+
+---
+
+**Gap 6 — No abuse prevention for BYOK key validation**
+
+The TAAS_SPEC.md (§3.3) describes BYOK key storage and encryption but does not describe how BYOK keys are validated before storage. A user could store an invalid key, which would cause every scan using that key to fail after consuming a token hold. Worse, a user could store a key belonging to another user (e.g., a leaked key) and use TaaS as a proxy to consume that key's quota.
+
+**Action:** Add a BYOK key validation step: when a key is stored, make a minimal test API call (e.g., list models, zero-cost endpoint) to verify the key is valid and belongs to the submitting user's account. If validation fails, reject the key storage. Log the validation attempt to the audit log.
+
+---
+
+**Gap 7 — No mention of Falco / eBPF as a secondary detection layer for the hosted service**
+
+SPEC.md §11 item 6 mentions Falco as a v1.1 addition for the offline tool. For the hosted TaaS service, Falco is more important: the worker runs untrusted skill content inside a container, and a sufficiently sophisticated skill could attempt to escape the MCP layer by exploiting a vulnerability in the Python runtime or the Ollama subprocess. Falco + eBPF at the host level would catch this class of escape.
+
+**Action:** Add Falco as a Phase 3 (Admin and Operations) deliverable for the TaaS service, not a deferred item. Each worker host should run Falco in daemon mode with a custom ruleset that alerts on: process spawning outside the expected process tree, outbound network connections from the worker process directly (bypassing the MCP interceptor), and filesystem writes outside `$CANARY_ROOT`.
+
+---
+
+**Gap 8 — No mention of report signing for the hosted service**
+
+SPEC.md §9.3 defers report signing to a future milestone. For the TaaS service, report signing is a meaningful differentiator: a signed report from `trace.skillscan.dev` is a verifiable attestation that the scan was run on SkillScan infrastructure with a specific model and policy profile. Enterprise buyers will ask for this.
+
+The implementation is straightforward: the worker signs the `report.json` file with an Ed25519 key before writing it to object storage. The public key is published at `https://trace.skillscan.dev/.well-known/signing-key.pub`. The HTML report includes the signature as a `<meta>` tag. Verification is a one-liner: `skillscan verify-report report.json`.
+
+**Action:** Add report signing as a Phase 4 (Polish and Launch) deliverable. Add `skillscan verify-report` as a CLI subcommand.
+
+---
+
+**Gap 9 — No mention of the "observe profile" interaction with the TaaS queue**
+
+The `include_observe_profile` option (§5.2) runs an additional pass with the `observe` policy profile and includes the full event log in the report. This doubles the trace execution time and the report size. The current token cost table (§4.2) does not account for this — a managed inference trace with `include_observe_profile: true` should cost more tokens than one without.
+
+**Action:** Add `+2 tokens` to the managed inference trace cost when `include_observe_profile: true`. Add `+1 token` for BYOK traces. Update the token cost table in §4.2.
+
+---
+
+**Gap 10 — No mention of skill content size limits**
+
+The API accepts `skill_content` as an inline string (§5.1). There is no documented size limit. A malicious user could submit a 10MB skill file, which would consume significant worker memory and potentially cause OOM on the worker. The `--max-file-size` flag exists in the offline scanner (M11.1) but is not referenced in the TaaS API spec.
+
+**Action:** Add a hard limit of 512KB for `skill_content` inline submissions. For `skill_url` submissions, add a 1MB limit on the fetched content. Return HTTP 413 for oversized submissions. Document in §5.1.
+
+---
+
+### 16.2 Items from Cisco's Scanner Worth Adopting
+
+Cisco's behavioral scanner includes several detection capabilities not currently in the skillscan-trace taxonomy:
+
+| Cisco capability | Status in skillscan-trace | Recommendation |
+|---|---|---|
+| Tool description injection detection | Not present | Add as PINJ-TRACE-003 (Gap 3 above) |
+| Shadow tool / duplicate tool name detection | Not present | Add as PSV-TRACE-003 (Gap 4 above) |
+| Rug-pull detection (tool behavior changes between invocations) | Not present | Add as MAL-TRACE-003 in v1.1 |
+| Cross-MCP server data leakage (data from one MCP server passed to another) | Not present | Add as EXF-TRACE-005 in v1.1 |
+| Timing-based evasion detection (tool calls that only execute after N turns) | Not present | Add as MAL-TRACE-004 in v1.1 |
+| Prompt injection via tool *name* (not description) | Not present | Add as PINJ-TRACE-004 in v1.1 |
+
+The v1.0 scope additions (PINJ-TRACE-003, PSV-TRACE-003) are small and well-defined. The v1.1 items require more design work and are deferred.
+
+---
+
+### 16.3 OWASP AST10 Coverage Mapping
+
+The current skillscan-trace taxonomy covers 7 of the 10 OWASP Agentic Skills Top 10 categories. The three gaps are noted:
+
+| OWASP AST10 Item | Coverage | Notes |
+|---|---|---|
+| AS-001: Prompt Injection | ✅ PINJ-TRACE-001, PINJ-TRACE-002 | Covered |
+| AS-002: Excessive Permissions | ✅ PSV-TRACE-001, PSV-TRACE-002 | Covered via undeclared tool use |
+| AS-003: Insecure Data Handling | ✅ EXF-TRACE-001 through EXF-TRACE-004 | Covered |
+| AS-004: Tool Poisoning | ⚠️ Partial | Description injection (Gap 3) and shadow tools (Gap 4) not yet covered |
+| AS-005: Unsafe Skill Composition | ❌ Not covered | Cross-skill data leakage requires multi-skill trace; deferred to v1.1 |
+| AS-006: Uncontrolled Resource Consumption | ⚠️ Partial | URL depth budget (Gap 2) addresses this partially; no CPU/memory budget per trace |
+| AS-007: Inadequate Logging | ✅ Full trace log | Covered |
+| AS-008: Insufficient Sandboxing | ⚠️ Partial | Falco layer (Gap 7) addresses the remaining gap |
+| AS-009: Insecure Credential Handling | ✅ EXF-TRACE-003, EXF-TRACE-004 | Covered via canary ENV vars |
+| AS-010: Unverified Skill Identity | ❌ Not covered | Report signing (Gap 8) is the path here; deferred to Phase 4 |
+
+---
+
+### 16.4 Infrastructure Revision: Nomad over SSH-based Rolling Restart
+
+The current §10.4 deployment plan uses GitHub Actions SSHing into workers for rolling restarts. This is the one place where SSH is required for routine operations, which contradicts the "no SSH for routine operations" goal.
+
+**Alternative:** Replace the SSH-based rolling restart with [HashiCorp Nomad](https://www.nomadproject.io/) running on the API gateway host as the control plane. Workers register as Nomad clients. Deployments are submitted as Nomad job specs via the Nomad HTTP API (no SSH). Nomad handles rolling updates, health checks, and automatic rescheduling on failure. The Hetzner API handles node provisioning; Nomad handles workload scheduling.
+
+**Cost:** Nomad is free and open-source. It runs on the existing API gateway host (no additional instance). The operational model is: Manus calls the Nomad API to deploy a new job version; Nomad rolls it across workers one at a time with health checks between each.
+
+**Tradeoff:** Nomad adds operational complexity (one more system to understand). Kubernetes is more widely known but is overkill for 2–4 workers. Nomad is the right size.
+
+**Action:** Update §10.4 to use Nomad for deployment. Add Nomad job spec templates to the `skillscan-trace` repo under `infra/nomad/`. The GitHub Actions `deploy.yml` workflow calls the Nomad API instead of SSHing into workers.
+
+---
