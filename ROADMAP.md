@@ -1,91 +1,72 @@
 # skillscan-trace Roadmap
 
-**Last updated:** 2026-03-20
+**Last updated:** 2026-03-27
 
-This roadmap covers the implementation of skillscan-trace from its current pre-implementation state through the scanner-as-a-service offering. It is organized into three phases: building the core tool, making it production-ready, and the hosted service layer.
-
----
-
-## Phase 1 — Core Tool (v1.0)
-
-The ten milestones in `IMPLEMENTATION_PLAN.md` constitute v1.0. The goal is a working CLI that any developer can install locally, run against a skill, and get a reliable behavioral trace report. No hosted infrastructure, no accounts, no tokens.
-
-**Milestone sequence:** Instrumented MCP server → Canary filesystem → ENV var interceptor → Agent harness → Skill resolver → Analyzer + report emitter → CLI → Config system → Docker image → Batch trace script (Modal)
-
-The acceptance criteria for each milestone are defined in `IMPLEMENTATION_PLAN.md`. v1.0 is complete when the integration test suite passes against the skillscan-security corpus with a false positive rate below 5% on the `corpus/benign/` set.
-
-**Compute for v1.0:** Ollama + `qwen2.5:7b` on CPU. No GPU required. No API key required. A developer with a standard laptop and 8GB RAM can run a trace in 30–60 seconds.
+skillscan-trace is a behavioral execution engine for MCP-based AI agent skills. The core CLI is complete (v0.1.0, 144 tests passing). This roadmap covers the path from current state to public open-source release and an optional hosted scan service.
 
 ---
 
-## Phase 2 — Reliability and Corpus Feedback (v1.1)
+## Phase A — Public Release Readiness (current)
 
-After v1.0 is working, the priority is improving detection quality through the corpus feedback loop and hardening the tool for use in CI/CD pipelines.
+The tool works. The goal of Phase A is to make the repo not embarrassing when it goes public: accurate docs, clean provider UX, and a clear privacy story.
 
-**Corpus feedback loop.** Run batch traces against the full skillscan-security corpus using Modal. Review traces that produce findings for skills the static analyzer missed. Add confirmed true positives to `corpus/sandbox_verified/` in skillscan-security. Re-train the ML classifier and measure F1 improvement. This is the primary mechanism for improving recall on behavioral patterns that static analysis misses — conditional payloads, obfuscated instructions, indirect injection via fetched content.
-
-**Bash AST parser (v1.1).** Upgrade the bash interceptor from regex-based to `bashlex`-based command parsing. Catches obfuscation patterns the regex misses: variable expansion, subshell execution, heredoc payloads, `eval` with encoded strings.
-
-**Falco secondary layer (v1.1).** Add Falco + eBPF as a secondary detection layer inside the Docker container. Catches behaviors that bypass the MCP layer — direct subprocess spawning, raw syscalls to canary paths. Not required for v1.0 but a meaningful improvement in detection depth.
-
-**Multi-model traces (v1.1).** Support running a skill against multiple models in sequence and reporting agreement/disagreement. Agreement across models increases confidence in findings; disagreement surfaces model-specific behavior.
-
-**GitHub Action (v1.1).** A GitHub Action that runs `skillscan-trace` as part of a PR check and posts results as a PR comment. This is the sticky CI/CD integration use case.
-
----
-
-## Phase 3 — Scanner as a Service (v2.0)
-
-The hosted service layer turns skillscan-trace into a developer product. The core value proposition: submit a skill URL or file, get a permanent report URL back. No local installation, no model download, no infrastructure to manage.
-
-### Why this makes sense
-
-Running skillscan-trace locally requires Ollama, a 5GB model download, and Python 3.11+. That is a meaningful barrier for a developer who wants a quick answer about a skill they found on GitHub. The hosted version removes that barrier entirely. The static scanner has the same friction problem — a hosted version is genuinely more convenient even for developers who could run it locally.
-
-The report hosting angle is a distribution mechanism. A skill author with a clean report at `skillscan.dev/reports/<id>` can link to it from their README as a trust signal. Every skill author who wants to signal trustworthiness becomes a marketing channel.
-
-### Token model
-
-Scans are gated by tokens. Tokens are purchased in packs and do not expire. The no-expiry policy is important for a developer tool — subscription fatigue is real, and infrequent users should not feel pressured to use tokens before they expire.
-
-| Scan type | Token cost | Notes |
+| Item | Description | Status |
 |---|---|---|
-| Static scan only | 1 token | Fast; no model inference |
-| Static + behavioral trace | 3 tokens | ~60s on our infrastructure |
-| Multi-model trace (2 models) | 5 tokens | Higher confidence findings |
-| Batch scan (GitHub repo) | Per-skill pricing | Scales with skill count |
+| A1 | `--provider` shortcut (openrouter, ollama, openai) + env var resolution | 🔄 In progress |
+| A3 | `PRIVACY.md` — plain-language key handling and data flow explanation | 🔄 In progress |
+| A4 | Docker image with `run` mode and `serve` mode (for self-hosting) | Planned |
+| A5 | Bash AST upgrade (`bashlex`) — catches obfuscation the regex misses | Planned |
+| A6 | Fix stale docs (ROADMAP, README, IMPLEMENTATION_PLAN version table) | ✅ Done |
 
-Initial token pack pricing is TBD pending cost modeling. At ~$0.006/trace on Modal L4 GPU, a 100-token pack at $10 would be roughly 3× margin on trace scans. Static-only scans are nearly free to run.
+**A1 — Provider UX.** Add `--provider openrouter | ollama | openai` to `run` and `check` commands. Wire env var resolution: `OPENROUTER_API_KEY` for OpenRouter, no key for Ollama. `--api-key` and `--base-url` still work as overrides. OpenRouter gives access to 200+ models through one key — a meaningful unlock for multi-model traces.
 
-### Infrastructure required
+**A3 — Privacy.** Write `PRIVACY.md`. One page, plain language: your API key goes directly to the provider you chose; the canary server runs in-process on your machine; nothing leaves your network except the LLM API calls you authorize; SkillScan has no server-side component in local mode.
 
-The hosted service requires four components beyond the trace tool itself:
+**A4 — Docker image.** Single image, two modes:
+- `docker run skillscan/trace run ./skill.md` — existing behavior, containerized
+- `docker run -p 8080:8080 skillscan/trace serve` — HTTP server for self-hosting and the hosted service
 
-**Report storage.** Scan results are stored in S3 and served at a permanent URL on the skillscan domain. The report viewer is a static page that renders the JSON trace report in a readable format. Reports are public by default (shareable link); a private report option (visible only to the submitting account) is a v2.1 feature.
-
-**Token API.** Issues tokens on purchase, validates tokens on scan submission, decrements on successful scan completion. Stripe handles payment. The token API is a thin service — issue, validate, decrement, list balance.
-
-**Scan queue.** Scans are async jobs. The user submits a skill and gets a job ID back immediately. The job runs on Modal (same infrastructure as the corpus generation batch script). When complete, the report URL is returned and optionally emailed. Queue depth and estimated wait time are surfaced in the API response.
-
-**GitHub Action.** A `skillscan/trace-action` GitHub Action that submits a skill to the hosted API using a token stored in repository secrets, waits for the report, and posts the report URL as a PR comment. This is the primary CI/CD integration path.
-
-### What we are not building
-
-A CA or notary model for skill signing. The overhead and liability are prohibitive. Report signing (signing our own reports with our public key) is a v2.1 consideration — it adds tamper protection to hosted reports but is not required for the initial launch.
-
-A subscription model. Token packs are the right pricing model for this product. Subscriptions imply ongoing value delivery that we are not ready to commit to at this stage.
-
-An enterprise tier. Not yet. The self-serve token model is the right starting point.
-
-### Prerequisite for launch
-
-The hosted service should not launch until the false positive rate on benign skills is below 2% and the detection rate on the `corpus/malicious/` set is above 85%. Selling scans with a high false positive rate damages trust faster than any marketing can recover.
+The `serve` mode exposes three endpoints: `POST /v1/submit`, `GET /v1/report/{id}`, `GET /v1/health`. This is the foundation for both self-hosted deployments and the Fly.io hosted service.
 
 ---
 
-## Relationship to skillscan-security
+## Phase B — Hosted Scan Service (BYOK)
 
-The SaaS layer sits above both skillscan (static) and skillscan-trace (behavioral). A hosted scan runs both pipelines and returns a unified report. The finding ID namespace, severity levels, and report schema are shared across both tools — the hosted report is a superset of what either tool produces independently.
+The hosted service is a thin wrapper around the same Docker image. The user brings their own API key; SkillScan provides the compute and report hosting. The key goes directly to the chosen provider — SkillScan never stores or logs it.
+
+**Infrastructure:** Fly.io Machines (compute) + Cloudflare R2 (report storage) + Cloudflare Workers (submission API + cache lookup). Estimated cost at 5,000 scans/day: ~$20–25/month.
+
+**Authentication model:**
+- Free tier (public OSS skills): URL-reachability check only. Submit a raw GitHub URL; the service fetches it, verifies it returns 200 without auth, runs the trace. No account required.
+- GitHub Actions: OIDC token verification. The Action presents a GitHub OIDC token; the service verifies the token's `repository` claim matches the submitted skill URL. No secrets to manage.
+- Self-hosted: `--remote-host` flag points the CLI at a self-hosted `serve` instance. The Docker image is the deployment artifact.
+
+**What we are not building (yet):**
+- Private repo scanning — self-hosted trace is the right path for private code
+- Managed inference (we pay the LLM) — BYOK until we have demand data
+- Subscription model — not the right pricing model for a developer tool
+
+| Item | Description | Status |
+|---|---|---|
+| B1 | `--remote` flag in CLI + `source_url` URL-reachability check on server | Planned |
+| B2 | Report storage (Cloudflare R2) + permanent report URLs | Planned |
+| B3 | SHA-based report cache (avoid re-scanning identical skills) | Planned |
+| B4 | GitHub OIDC verification for Actions integration | Planned |
+| B5 | `skillscan/trace-action` GitHub Action | Planned |
+
+---
+
+## Phase C — Detection Quality (ongoing)
+
+Detection quality improvements that can be shipped independently of the hosted service.
+
+| Item | Description | Status |
+|---|---|---|
+| C1 | Corpus feedback loop — batch traces against skillscan-security corpus | Planned |
+| C2 | Multi-model traces — run against 2+ models, report agreement | Planned |
+| C3 | Falco + eBPF secondary layer (catches subprocess spawning, raw syscalls) | Future |
+
+**Launch gate for hosted service:** False positive rate on benign skills below 2% and detection rate on `corpus/malicious/` above 85%. Selling scans with a high false positive rate damages trust faster than any marketing can recover.
 
 ---
 
@@ -93,7 +74,7 @@ The SaaS layer sits above both skillscan (static) and skillscan-trace (behaviora
 
 | Version | Status | Description |
 |---|---|---|
-| v0.1-dev | Current | Spec only, no implementation |
-| v1.0 | Planned | Core CLI, local execution, Ollama default |
-| v1.1 | Planned | Corpus feedback loop, bash AST, GitHub Action |
-| v2.0 | Future | Hosted scanner-as-a-service, token model, report hosting |
+| 0.1.0 | ✅ Current | Core CLI complete — Phases 1–5 implemented, 144/144 tests passing |
+| 0.2.0 | Planned | Phase A complete — provider UX, Docker image, PRIVACY.md |
+| 0.3.0 | Planned | Phase B MVP — hosted BYOK scan service, report URLs |
+| 1.0.0 | Future | Phase C — detection quality gate met, production-ready |

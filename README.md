@@ -29,45 +29,51 @@ skillscan-trace works by:
 4. Checking each call against a canary taxonomy (credential files, wallet paths, ENV vars, binary probing, network destinations)
 5. Emitting a structured trace report (JSON + SARIF) with every observed behavior and any findings
 
-The model runs locally via [Ollama](https://ollama.com/) — no API key required, no cloud dependency. An API model fallback (OpenAI, Anthropic) is supported for users who prefer it.
+The model runs locally via [Ollama](https://ollama.com/) — no API key required, no cloud dependency. API providers (OpenAI, OpenRouter, Anthropic) are supported for users who prefer them or want access to more capable models.
 
 ---
 
 ## Status
 
-**Pre-implementation.** This repository contains the complete v1.0 specification and architecture. No code has been written yet. The spec is designed to be picked up by any engineer (or agent) and implemented without additional context.
+**v0.1.0 — core CLI complete.** Phases 1–5 are implemented and 144/144 tests pass. The tool is installable and usable today.
 
 See [`SPEC.md`](./SPEC.md) for the full behavioral specification.  
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the system design.  
-See [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md) for the ordered build plan.
+See [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md) for the build plan and phase status.
 
 ---
 
-## Quick start (once implemented)
+## Quick start
 
 ```bash
-# Install
-pip install skillscan-trace
+# Install from source
+git clone https://github.com/kurtpayne/skillscan-trace
+cd skillscan-trace
+pip install -e .
 
-# Pull a model (one-time, ~4GB)
-ollama pull qwen2.5:7b
-
-# Run a trace
+# Run a trace with OpenAI
+export OPENAI_API_KEY=sk-...
 skillscan-trace run ./path/to/skill/
 
-# Run with a specific prompt
-skillscan-trace run ./skill/ --prompt "Help me commit my changes to git"
+# Run with OpenRouter (200+ models via one key)
+export OPENROUTER_API_KEY=sk-or-...
+skillscan-trace run ./skill/ --provider openrouter --model mistralai/mistral-7b-instruct
 
-# Run with API model fallback
-skillscan-trace run ./skill/ --model openai/gpt-4o-mini --key $OPENAI_API_KEY
+# Run with a local Ollama model (no API key required)
+skillscan-trace run ./skill/ --provider ollama --model qwen2.5:7b
 
-# Run with a named profile (allowlists Google Cloud domains)
-skillscan-trace run ./skill/ --profile google_cloud
+# Run with explicit base URL (Azure, Mistral, etc.)
+skillscan-trace run ./skill/ --base-url https://api.mistral.ai/v1 --api-key $MISTRAL_KEY
 
 # Output formats
-skillscan-trace run ./skill/ --format sarif   # SARIF 2.1.0
+skillscan-trace run ./skill/ --format sarif   # SARIF 2.1.0 for CI
 skillscan-trace run ./skill/ --format json    # native trace format
 skillscan-trace run ./skill/ --format text    # human-readable summary
+
+# Verify connectivity
+skillscan-trace check
+skillscan-trace check --provider openrouter
+skillscan-trace check --provider ollama
 ```
 
 ---
@@ -128,6 +134,14 @@ skillscan-trace is a sibling project to [skillscan-security](https://github.com/
 - **Canary taxonomy**: The same list of high-value target paths and ENV var names
 - **Domain allowlist**: `trace/domains/verified.yml` from skillscan-security is the source of truth; skillscan-trace consumes it
 - **Corpus feedback loop**: Traces that produce findings can be reviewed and added to the skillscan-security corpus as `sandbox_verified/` examples, improving the ML classifier's recall on behavioral patterns that static analysis misses
+
+---
+
+## Privacy & Key Handling
+
+Your API key goes directly to the LLM provider you chose. The canary server runs in-process on your machine. Nothing leaves your network except the LLM API calls you explicitly authorize. SkillScan has no server-side component in local mode.
+
+See [`PRIVACY.md`](./PRIVACY.md) for the full data flow explanation.
 
 ---
 

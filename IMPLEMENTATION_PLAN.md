@@ -268,3 +268,4 @@ After Milestone 7 is complete, the corpus feedback loop can begin:
 | Version | Date | Notes |
 |---|---|---|
 | 0.1 (spec) | 2026-03-20 | Initial spec, pre-implementation |
+| 0.1.0 | 2026-03-27 | Core CLI complete — Phases 1–5 implemented, 144/144 tests passing |

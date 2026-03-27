@@ -1,0 +1,75 @@
+# Privacy & Key Handling
+
+skillscan-trace is a local tool. **Your skill files, API keys, and trace results never leave your machine** except for the LLM API calls you explicitly authorize.
+
+---
+
+## What happens during a trace
+
+When you run `skillscan-trace run ./skill.md`, the following happens entirely on your machine:
+
+1. **Skill loading.** The skill file is read from your local filesystem. It is not uploaded anywhere.
+2. **Canary environment setup.** A temporary directory is created in-process with synthetic credential files, wallet paths, and environment variables. These are randomly generated per run and have no real value.
+3. **LLM API call.** The skill's content is sent to the LLM provider you configured (`--provider openai`, `--provider openrouter`, or `--provider ollama`). This is the only network request skillscan-trace makes. The request goes directly from your machine to the provider — it does not pass through any SkillScan server.
+4. **Canary server.** The instrumented MCP server runs in-process. It intercepts every tool call the model makes and checks it against the canary taxonomy. No subprocess is spawned; no data is written to disk except the trace report you explicitly request.
+5. **Report output.** The trace report is written to your local `./trace-output/` directory (or the path you specify with `--output-dir`). It is not uploaded anywhere.
+
+---
+
+## Your API key
+
+Your API key is passed directly to the LLM provider you chose. It is not:
+
+- Stored by skillscan-trace (it is read from your environment variable or `--api-key` flag and used only for the duration of the run)
+- Transmitted to any SkillScan server (there is no SkillScan server in local mode)
+- Logged to disk (the trace report does not include your API key)
+- Shared with any third party other than the LLM provider you selected
+
+If you use `--provider openrouter`, your key goes to [OpenRouter](https://openrouter.ai). If you use `--provider openai`, it goes to [OpenAI](https://openai.com). If you use `--provider ollama`, no key is required and no network request is made to any external service.
+
+---
+
+## What is sent to the LLM provider
+
+The LLM API call contains:
+
+- The skill's `SKILL.md` content (as the system prompt)
+- A generated user message that exercises the skill's stated functionality
+- The canary tool definitions (the list of tools the model can call)
+
+The canary tool definitions describe the tool interface (names, parameter schemas) but do not contain any real credential values. The canary values (fake AWS keys, fake wallet seeds, etc.) are only present in the tool *responses* that the canary server returns when the model calls a tool — those responses stay on your machine and are never sent back to the LLM provider in a way that would expose them.
+
+---
+
+## Ollama (fully local)
+
+If you use `--provider ollama`, the entire trace runs on your machine with no external network requests. The model runs locally via [Ollama](https://ollama.com/). No API key is required. No data leaves your machine.
+
+---
+
+## Trace reports
+
+Trace reports (JSON, SARIF, text) are written to your local filesystem only. They contain:
+
+- The skill path and SHA-256 hash of the skill content
+- The model and provider used
+- All tool calls the model made (tool name, arguments, canary server response)
+- Any findings (rule ID, severity, description)
+- Token usage for the run
+
+They do not contain your API key, your system's real credential files, or any data from outside the canary environment.
+
+---
+
+## Summary
+
+| Data | Where it goes |
+|---|---|
+| Skill file content | LLM provider (as system prompt) |
+| API key | LLM provider only (never stored or logged) |
+| Canary tool definitions | LLM provider (tool schemas, no real values) |
+| Canary credential values | Your machine only (in-process canary server) |
+| Trace report | Your local filesystem only |
+| Your real credential files | Not accessed (canary uses synthetic files) |
+
+If you have questions or concerns about data handling, open an issue at [github.com/kurtpayne/skillscan-trace](https://github.com/kurtpayne/skillscan-trace/issues).

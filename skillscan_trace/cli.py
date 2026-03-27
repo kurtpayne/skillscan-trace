@@ -42,16 +42,87 @@ def main(debug: bool) -> None:
     )
 
 
+PROVIDER_CONFIGS = {
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "env_key": "OPENAI_API_KEY",
+        "default_model": "gpt-4.1-mini",
+        "requires_key": True,
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_key": "OPENROUTER_API_KEY",
+        "default_model": "openai/gpt-4.1-mini",
+        "requires_key": True,
+    },
+    "ollama": {
+        "base_url": "http://localhost:11434/v1",
+        "env_key": None,
+        "default_model": "qwen2.5:7b",
+        "requires_key": False,
+    },
+}
+
+
+def _resolve_provider(
+    provider: str | None,
+    api_key: str | None,
+    base_url: str | None,
+    model: str,
+) -> tuple[str, str | None, str]:
+    """Resolve (base_url, api_key, model) from --provider / --api-key / --base-url.
+
+    Priority: explicit --api-key / --base-url override everything.
+    --provider sets sensible defaults and picks the right env var.
+    """
+    if provider and provider not in PROVIDER_CONFIGS:
+        raise click.BadParameter(
+            f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_CONFIGS)}",
+            param_hint="--provider",
+        )
+
+    cfg = PROVIDER_CONFIGS.get(provider or "openai")
+
+    # base_url: explicit flag > provider default
+    resolved_base_url = base_url or cfg["base_url"]
+
+    # model: if user passed the bare default (gpt-4.1-mini) and provider has its own
+    # default, use the provider default instead so openrouter gets openai/gpt-4.1-mini
+    resolved_model = model
+    if model == "gpt-4.1-mini" and provider and provider != "openai":
+        resolved_model = cfg["default_model"]
+
+    # api_key: explicit flag > env var for this provider > OPENAI_API_KEY fallback
+    if api_key:
+        resolved_key = api_key
+    elif cfg["env_key"]:
+        resolved_key = os.environ.get(cfg["env_key"]) or os.environ.get("OPENAI_API_KEY")
+    else:
+        resolved_key = os.environ.get("OPENAI_API_KEY")  # ollama: key not required
+
+    if cfg["requires_key"] and not resolved_key:
+        env_hint = cfg["env_key"] or "OPENAI_API_KEY"
+        raise click.UsageError(
+            f"No API key found for provider '{provider or 'openai'}'. "
+            f"Set {env_hint} or pass --api-key."
+        )
+
+    return resolved_base_url, resolved_key, resolved_model
+
+
 @main.command()
 @click.argument("skill", type=click.Path(exists=True))
+@click.option("--provider", default=None,
+              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+              help="LLM provider shortcut. Sets base URL and env var automatically.")
 @click.option("--model", default="gpt-4.1-mini", show_default=True,
               help="LLM model for execution (any OpenAI-compatible model).")
 @click.option("--input-model", default="gpt-4.1-mini", show_default=True,
               help="LLM model for generating user messages.")
-@click.option("--api-key", envvar="OPENAI_API_KEY",
-              help="OpenAI API key (or set OPENAI_API_KEY).")
+@click.option("--api-key", default=None,
+              help="API key. Overrides provider env var (OPENAI_API_KEY, OPENROUTER_API_KEY).")
 @click.option("--base-url", default=None,
-              help="Custom API base URL (e.g. http://localhost:11434/v1 for Ollama).")
+              help="Custom API base URL. Overrides --provider default (e.g. for Azure, Mistral).")
 @click.option("--variants", default=3, show_default=True,
               help="Number of user messages to generate per skill.")
 @click.option("--max-turns", default=10, show_default=True,
@@ -76,6 +147,7 @@ def main(debug: bool) -> None:
               help="Exit with code 1 if any malicious skill is detected (for CI).")
 def run(
     skill: str,
+    provider: str | None,
     model: str,
     input_model: str,
     api_key: str | None,
@@ -92,6 +164,7 @@ def run(
     fail_on_malicious: bool,
 ) -> None:
     """Run a behavioral trace on SKILL (file or directory)."""
+    base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
     from skillscan_trace.formatters import (
         format_json, format_sarif, format_text, format_batch_summary
     )
@@ -350,26 +423,39 @@ def _display_report(report) -> None:
 
 
 @main.command()
-@click.option("--api-key", envvar="OPENAI_API_KEY")
+@click.option("--provider", default=None,
+              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+              help="LLM provider to check. Defaults to openai.")
+@click.option("--api-key", default=None,
+              help="API key. Overrides provider env var.")
 @click.option("--base-url", default=None,
-              help="API base URL. Defaults to https://api.openai.com/v1")
-def check(api_key: str | None, base_url: str | None) -> None:
+              help="Custom API base URL. Overrides --provider default.")
+def check(provider: str | None, api_key: str | None, base_url: str | None) -> None:
     """Verify API connectivity and canary server."""
     console.print("[cyan]Checking API connectivity...[/cyan]")
 
-    effective_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-    if not effective_key:
-        console.print("[red]No API key found. Set OPENAI_API_KEY.[/red]")
+    provider_label = provider or "openai"
+    cfg = PROVIDER_CONFIGS[provider_label]
+
+    # Resolve key
+    effective_key = api_key
+    if not effective_key and cfg["env_key"]:
+        effective_key = os.environ.get(cfg["env_key"]) or os.environ.get("OPENAI_API_KEY")
+    if not effective_key and provider_label == "ollama":
+        effective_key = "ollama"  # Ollama accepts any non-empty string
+    if cfg["requires_key"] and not effective_key:
+        console.print(f"[red]No API key found. Set {cfg['env_key']} or pass --api-key.[/red]")
         sys.exit(1)
 
-    effective_base_url = base_url or "https://api.openai.com/v1"
+    effective_base_url = base_url or cfg["base_url"]
+    console.print(f"[dim]Provider: {provider_label} | Base URL: {effective_base_url}[/dim]")
 
     try:
         from openai import OpenAI  # type: ignore
-        client = OpenAI(api_key=effective_key, base_url=effective_base_url)
+        client = OpenAI(api_key=effective_key or "none", base_url=effective_base_url)
         models_resp = client.models.list()
-        model_ids = [m.id for m in models_resp.data if 'gpt-4' in m.id][:5]
-        console.print(f"[green]API OK — GPT-4 models: {model_ids}[/green]")
+        model_ids = [m.id for m in models_resp.data][:5]
+        console.print(f"[green]API OK — models available: {model_ids}[/green]")
     except Exception as e:
         console.print(f"[red]API check failed: {e}[/red]")
         sys.exit(1)
@@ -385,20 +471,25 @@ def check(api_key: str | None, base_url: str | None) -> None:
 
 
 @main.command()
-@click.option("--api-key", envvar="OPENAI_API_KEY")
-@click.option("--base-url", default=None)
-def models(api_key: str | None, base_url: str | None) -> None:
-    """List available models."""
-    effective_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-    if not effective_key:
-        console.print("[red]No API key found.[/red]")
-        sys.exit(1)
+@click.option("--provider", default=None,
+              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+              help="LLM provider. Defaults to openai.")
+@click.option("--api-key", default=None,
+              help="API key. Overrides provider env var.")
+@click.option("--base-url", default=None,
+              help="Custom API base URL. Overrides --provider default.")
+def models(provider: str | None, api_key: str | None, base_url: str | None) -> None:
+    """List available models from the configured provider."""
+    resolved_base_url, resolved_key, _ = _resolve_provider(
+        provider, api_key, base_url, "gpt-4.1-mini"
+    )
+    effective_key = resolved_key or "none"
 
     from openai import OpenAI  # type: ignore
-    client = OpenAI(api_key=effective_key, base_url=base_url)
+    client = OpenAI(api_key=effective_key, base_url=resolved_base_url)
     model_list = client.models.list()
 
-    table = Table(title="Available Models")
+    table = Table(title=f"Available Models ({provider or 'openai'})")
     table.add_column("ID")
     table.add_column("Created")
     for m in sorted(model_list.data, key=lambda x: x.id):
