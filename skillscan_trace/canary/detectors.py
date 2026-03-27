@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     pass
 
 from skillscan_trace.models import Finding, Severity
+from skillscan_trace.canary.bash_ast import analyze_bash_ast, BashParseError
 
 
 # ---------------------------------------------------------------------------
@@ -183,24 +184,61 @@ EMAIL_ALLOWED_DOMAINS: set[str] = set()  # populated from config; empty = flag a
 # ---------------------------------------------------------------------------
 
 def detect_bash(arguments: dict, event=None) -> list[Finding]:
-    """Detect suspicious patterns in bash tool calls."""
+    """Detect suspicious patterns in bash tool calls.
+
+    Uses bashlex AST analysis (Trace-A5) as the primary detection layer.
+    Falls back to the original regex patterns when bashlex cannot parse the
+    command (e.g. heavily obfuscated syntax, heredocs, or parse errors).
+    Both layers run independently — regex is not skipped on AST success.
+    """
     findings: list[Finding] = []
     command = arguments.get("command", "")
     if not command:
         return findings
 
+    # --- Layer 1: AST-based detection (Trace-A5) ---
+    ast_used = False
+    try:
+        ast_findings = analyze_bash_ast(command)
+        ast_used = True
+        # Deduplicate by rule_id+evidence before adding
+        seen = set()
+        for bf in ast_findings:
+            key = (bf.rule_id, bf.evidence[:80])
+            if key not in seen:
+                seen.add(key)
+                findings.append(Finding(
+                    rule_id=bf.rule_id,
+                    severity=bf.severity,
+                    message=bf.message + " [ast]",
+                    event=event,
+                    evidence=bf.evidence,
+                ))
+    except BashParseError:
+        # Fall through to regex layer
+        pass
+
+    # --- Layer 2: Regex patterns (always runs as belt-and-suspenders) ---
+    # Run regex regardless of AST success to catch obfuscated commands that
+    # parse but whose structure is not fully modelled by the AST rules.
     for pattern, rule_id, severity, message in BASH_PATTERNS:
         m = pattern.search(command)
         if m:
-            findings.append(Finding(
-                rule_id=rule_id,
-                severity=severity,
-                message=message,
-                event=event,
-                evidence=command[:300],
-            ))
+            # Avoid exact duplicates with AST findings (same rule_id + similar evidence)
+            already = any(
+                f.rule_id == rule_id and f.evidence[:80] == command[:80]
+                for f in findings
+            )
+            if not already:
+                findings.append(Finding(
+                    rule_id=rule_id,
+                    severity=severity,
+                    message=message + (" [regex-fallback]" if not ast_used else " [regex]"),
+                    event=event,
+                    evidence=command[:300],
+                ))
 
-    # Check for canary value relay
+    # --- Layer 3: Canary relay detection (always runs) ---
     for canary in CANARY_VALUES:
         if canary in command:
             findings.append(Finding(

@@ -27,6 +27,7 @@ dependencies = [
     "jsonschema>=4.0",
     "rich>=13.0",
     "requests>=2.0",
+    "bashlex>=0.18",
 ]
 
 [project.optional-dependencies]
