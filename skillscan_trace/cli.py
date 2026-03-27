@@ -27,12 +27,17 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
+from skillscan_trace.config import load_config, merge_config
+
 console = Console()
 
 
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
-def main(debug: bool) -> None:
+@click.option("--config", "config_path", default=None, type=click.Path(exists=True),
+              help="Path to a skillscan-trace.yaml config file. Auto-discovered if not set.")
+@click.pass_context
+def main(ctx: click.Context, debug: bool, config_path: str | None) -> None:
     """skillscan-trace — behavioral execution engine for AI agent skills."""
     level = logging.DEBUG if debug else logging.WARNING
     logging.basicConfig(
@@ -40,6 +45,19 @@ def main(debug: bool) -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
         stream=sys.stderr,
     )
+    ctx.ensure_object(dict)
+    try:
+        cfg = load_config(Path(config_path) if config_path else None)
+    except ValueError as e:
+        console.print(f"[red]Config error: {e}[/red]")
+        sys.exit(1)
+    ctx.obj["cfg"] = cfg
+    if cfg and not debug:
+        # Show which config file was loaded (helpful for debugging)
+        from skillscan_trace.config import find_config_file
+        found = find_config_file() if not config_path else Path(config_path)
+        if found:
+            console.print(f"[dim]Using config: {found}[/dim]", highlight=False)
 
 
 PROVIDER_CONFIGS = {
@@ -115,55 +133,86 @@ def _resolve_provider(
 @click.option("--provider", default=None,
               type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
               help="LLM provider shortcut. Sets base URL and env var automatically.")
-@click.option("--model", default="gpt-4.1-mini", show_default=True,
-              help="LLM model for execution (any OpenAI-compatible model).")
-@click.option("--input-model", default="gpt-4.1-mini", show_default=True,
-              help="LLM model for generating user messages.")
+@click.option("--model", default=None,
+              help="LLM model for execution (any OpenAI-compatible model). Default: gpt-4.1-mini")
+@click.option("--input-model", default=None,
+              help="LLM model for generating user messages. Default: gpt-4.1-mini")
 @click.option("--api-key", default=None,
               help="API key. Overrides provider env var (OPENAI_API_KEY, OPENROUTER_API_KEY).")
 @click.option("--base-url", default=None,
               help="Custom API base URL. Overrides --provider default (e.g. for Azure, Mistral).")
-@click.option("--variants", default=3, show_default=True,
-              help="Number of user messages to generate per skill.")
-@click.option("--max-turns", default=10, show_default=True,
-              help="Maximum tool-call rounds per user message.")
+@click.option("--variants", default=None, type=int,
+              help="Number of user messages to generate per skill. Default: 3")
+@click.option("--max-turns", default=None, type=int,
+              help="Maximum tool-call rounds per user message. Default: 10")
 @click.option("--output-dir", default=None, type=click.Path(),
-              help="Directory to write output files. Defaults to ./trace-output/.")
+              help="Directory to write output files. Default: ./trace-output/")
 @click.option("--format", "output_format",
               type=click.Choice(["json", "sarif", "text"], case_sensitive=False),
-              default="json", show_default=True,
-              help="Output format. sarif produces a single SARIF 2.1.0 file for CI.")
+              default=None,
+              help="Output format. sarif produces a single SARIF 2.1.0 file for CI. Default: json")
 @click.option("--allow-domain", "allow_domains", multiple=True,
               help="Additional domains to allow (repeatable).")
 @click.option("--dry-run", is_flag=True,
               help="Resolve the skill and generate messages but do not run the LLM.")
-@click.option("--judge", is_flag=True,
+@click.option("--judge", is_flag=True, default=None,
               help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.")
 @click.option("--anthropic-api-key", envvar="ANTHROPIC_API_KEY",
               help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).")
 @click.option("--quiet", "-q", is_flag=True,
               help="Suppress per-skill output; show only the summary.")
-@click.option("--fail-on-malicious", is_flag=True,
+@click.option("--fail-on-malicious", is_flag=True, default=None,
               help="Exit with code 1 if any malicious skill is detected (for CI).")
+@click.pass_context
 def run(
+    ctx: click.Context,
     skill: str,
     provider: str | None,
-    model: str,
-    input_model: str,
+    model: str | None,
+    input_model: str | None,
     api_key: str | None,
     base_url: str | None,
-    variants: int,
-    max_turns: int,
+    variants: int | None,
+    max_turns: int | None,
     output_dir: str | None,
-    output_format: str,
+    output_format: str | None,
     allow_domains: tuple[str, ...],
     dry_run: bool,
-    judge: bool,
+    judge: bool | None,
     anthropic_api_key: str | None,
     quiet: bool,
-    fail_on_malicious: bool,
+    fail_on_malicious: bool | None,
 ) -> None:
     """Run a behavioral trace on SKILL (file or directory)."""
+    # Merge config file values with CLI flags (CLI wins)
+    cfg = merge_config(
+        ctx.obj.get("cfg", {}),
+        provider=provider,
+        model=model,
+        input_model=input_model,
+        api_key=api_key,
+        base_url=base_url,
+        variants=variants,
+        max_turns=max_turns,
+        output_dir=output_dir,
+        output_format=output_format,
+        judge=judge,
+        fail_on_malicious=fail_on_malicious,
+        allow_domains=allow_domains,
+    )
+    provider = cfg.get("provider")
+    model = cfg.get("model", "gpt-4.1-mini")
+    input_model = cfg.get("input_model", "gpt-4.1-mini")
+    api_key = cfg.get("api_key")
+    base_url = cfg.get("base_url")
+    variants = cfg.get("variants", 3)
+    max_turns = cfg.get("max_turns", 10)
+    output_dir = cfg.get("output_dir")
+    output_format = cfg.get("format", "json")
+    judge = cfg.get("judge", False)
+    fail_on_malicious = cfg.get("fail_on_malicious", False)
+    allow_domains = tuple(cfg.get("allow_domains", []))
+
     base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
     from skillscan_trace.formatters import (
         format_json, format_sarif, format_text, format_batch_summary
@@ -495,6 +544,77 @@ def models(provider: str | None, api_key: str | None, base_url: str | None) -> N
     for m in sorted(model_list.data, key=lambda x: x.id):
         table.add_row(m.id, str(m.created))
     console.print(table)
+
+
+@main.command()
+@click.option("--host", default="0.0.0.0", show_default=True,
+              help="Host to bind the server to.")
+@click.option("--port", default=8080, show_default=True, type=int,
+              help="Port to listen on.")
+@click.option("--workers", default=4, show_default=True, type=int,
+              help="Number of concurrent trace workers.")
+@click.option("--cache-dir", default="./trace-cache", show_default=True, type=click.Path(),
+              help="Directory to cache trace reports (keyed by sha256 of skill+model).")
+@click.option("--rate-limit", default=10, show_default=True, type=int,
+              help="Max trace submissions per IP per hour (0 = unlimited).")
+@click.pass_context
+def serve(
+    ctx: click.Context,
+    host: str,
+    port: int,
+    workers: int,
+    cache_dir: str,
+    rate_limit: int,
+) -> None:
+    """Start a self-hosted trace API server.
+
+    Accepts POST /v1/submit with skill content and a BYOK api_key.
+    Results are available via GET /v1/report/{job_id}.
+    Reports are cached by sha256(skill+model) to avoid redundant runs.
+
+    Example:
+
+      # Start the server
+      skillscan-trace serve --port 8080
+
+      # Submit a trace (BYOK)
+      curl -X POST http://localhost:8080/v1/submit \\
+        -H 'Content-Type: application/json' \\
+        -d '{"skill_content": "...", "api_key": "sk-...", "provider": "openai"}'
+
+      # Poll for results
+      curl http://localhost:8080/v1/report/<job_id>
+    """
+    # Merge config file serve-mode keys
+    cfg = ctx.obj.get("cfg", {})
+    resolved_host = cfg.get("host", host)
+    resolved_port = cfg.get("port", port)
+    resolved_workers = cfg.get("workers", workers)
+    resolved_cache_dir = Path(cfg.get("cache_dir", cache_dir))
+    resolved_rate_limit = cfg.get("rate_limit_per_hour", rate_limit)
+
+    console.print(
+        f"[cyan]Starting skillscan-trace server on {resolved_host}:{resolved_port}[/cyan]"
+    )
+    console.print(f"[dim]Workers: {resolved_workers} | Cache: {resolved_cache_dir} | "
+                  f"Rate limit: {resolved_rate_limit}/hr/IP[/dim]")
+
+    try:
+        from skillscan_trace.serve import run_server
+    except ImportError:
+        console.print(
+            "[red]serve mode requires extra dependencies.[/red]\n"
+            "Install with: [bold]pip install skillscan-trace[serve][/bold]"
+        )
+        sys.exit(1)
+
+    run_server(
+        host=resolved_host,
+        port=resolved_port,
+        workers=resolved_workers,
+        cache_dir=resolved_cache_dir,
+        rate_limit_per_hour=resolved_rate_limit,
+    )
 
 
 if __name__ == "__main__":

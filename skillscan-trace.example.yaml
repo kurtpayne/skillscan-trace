@@ -1,0 +1,64 @@
+# skillscan-trace.yaml — project-level configuration
+#
+# Copy this file to skillscan-trace.yaml (or .skillscan-trace.yaml) in your
+# project root. CLI flags always override these values.
+#
+# Config file lookup: skillscan-trace searches the current directory and all
+# parent directories for skillscan-trace.yaml or .skillscan-trace.yaml.
+# The nearest file wins, so you can have per-project configs.
+
+# ── Provider ──────────────────────────────────────────────────────────────────
+# Shortcut for common providers. Sets base_url and reads the right env var.
+# Options: openai | openrouter | ollama
+# Default: openai (reads OPENAI_API_KEY)
+provider: openai
+
+# Model for running the skill (any OpenAI-compatible model ID)
+# OpenAI examples:   gpt-4.1-mini, gpt-4.1, o3-mini
+# OpenRouter examples: openai/gpt-4.1-mini, anthropic/claude-3.5-sonnet
+# Ollama examples:   qwen2.5:7b, llama3.1:8b
+model: gpt-4.1-mini
+
+# Model for generating user messages (can be cheaper than the execution model)
+input_model: gpt-4.1-mini
+
+# Override the API base URL (for Azure, Mistral, or any OpenAI-compatible API)
+# Overrides --provider default. Leave commented to use the provider default.
+# base_url: https://api.mistral.ai/v1
+
+# ── Trace parameters ──────────────────────────────────────────────────────────
+# Number of distinct user messages to generate per skill
+variants: 3
+
+# Maximum tool-call rounds per user message
+max_turns: 10
+
+# ── Output ────────────────────────────────────────────────────────────────────
+# Directory to write trace reports (relative to cwd or absolute)
+output_dir: ./trace-output
+
+# Output format: json | sarif | text
+# sarif produces a single SARIF 2.1.0 file suitable for GitHub Code Scanning
+format: json
+
+# ── CI integration ────────────────────────────────────────────────────────────
+# Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after each trace
+# Requires ANTHROPIC_API_KEY to be set
+judge: false
+
+# Exit with code 1 if any malicious skill is detected (for CI gates)
+fail_on_malicious: false
+
+# ── Domain allowlist ──────────────────────────────────────────────────────────
+# Additional domains the skill is allowed to contact (beyond the canary defaults)
+# allow_domains:
+#   - api.example.com
+#   - cdn.example.com
+
+# ── Serve mode (for self-hosted trace server) ─────────────────────────────────
+# These keys are only used when running: skillscan-trace serve
+# host: 0.0.0.0
+# port: 8080
+# workers: 4
+# cache_dir: ./trace-cache
+# rate_limit_per_hour: 10
