@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
-import pytest
 
 from skillscan_trace.models import TraceReport, TraceEvent, Finding, Severity
 from skillscan_trace.formatters import (

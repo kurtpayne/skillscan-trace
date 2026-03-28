@@ -17,7 +17,6 @@ import concurrent.futures
 import logging
 import os
 import time
-from typing import Any
 
 from skillscan_trace.judge.models import (
     AgreementLevel,

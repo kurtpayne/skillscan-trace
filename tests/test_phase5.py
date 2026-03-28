@@ -7,7 +7,6 @@ All tests use temp directories — no network, no Modal, no LLM calls.
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest

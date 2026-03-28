@@ -7,8 +7,6 @@ All tests are pure unit tests — no network, no LLM calls.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import pytest

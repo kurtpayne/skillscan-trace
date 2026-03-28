@@ -23,7 +23,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -157,7 +157,6 @@ def _parse_markdown(
 ) -> ResolvedSkill:
     """Parse a Markdown file, extracting YAML frontmatter if present."""
     metadata: dict[str, Any] = {}
-    body = content
 
     # Try to extract YAML frontmatter (--- ... ---)
     if content.startswith("---"):
@@ -166,12 +165,11 @@ def _parse_markdown(
             frontmatter_str = content[3:end].strip()
             try:
                 metadata = yaml.safe_load(frontmatter_str) or {}
-                body = content[end + 4:].lstrip("\n")
+                content[end + 4:].lstrip("\n")
                 fmt = SkillFormat.MARKDOWN_FRONTMATTER
             except yaml.YAMLError:
                 # Malformed frontmatter — treat as plain markdown
                 metadata = {}
-                body = content
                 fmt = SkillFormat.MARKDOWN_PLAIN
         else:
             fmt = SkillFormat.MARKDOWN_PLAIN

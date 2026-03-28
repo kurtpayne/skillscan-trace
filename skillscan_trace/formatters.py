@@ -12,7 +12,6 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from skillscan_trace.models import TraceReport
 

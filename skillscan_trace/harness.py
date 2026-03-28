@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from skillscan_trace.canary.server import CanaryServer, TraceLog
 from skillscan_trace.canary.server import TOOL_DEFINITIONS

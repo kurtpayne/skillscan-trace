@@ -9,9 +9,18 @@ from skillscan_trace.canary.detectors import (
     CANARY_SECRET,
     CANARY_TOKEN,
     detect_bash,
+    detect_calendar_create,
+    detect_calendar_list,
+    detect_email_send,
+    detect_github_create_issue,
+    detect_github_push_file,
+    detect_gmail_send,
     detect_http_fetch,
     detect_list_directory,
+    detect_notion_append_block,
+    detect_notion_create_page,
     detect_read_file,
+    detect_slack_post_message,
     detect_write_file,
     run_detectors,
 )
@@ -329,22 +338,6 @@ class TestRunDetectors:
     def test_clean_call_returns_empty(self):
         findings = run_detectors("bash", {"command": "ls /tmp"})
         assert findings == []
-
-
-# ---------------------------------------------------------------------------
-# Import new detectors
-# ---------------------------------------------------------------------------
-from skillscan_trace.canary.detectors import (
-    detect_email_send,
-    detect_gmail_send,
-    detect_calendar_create,
-    detect_calendar_list,
-    detect_github_create_issue,
-    detect_github_push_file,
-    detect_slack_post_message,
-    detect_notion_create_page,
-    detect_notion_append_block,
-)
 
 
 # ---------------------------------------------------------------------------

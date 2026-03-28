@@ -18,7 +18,7 @@ from skillscan_trace.judge.models import (
     JudgeResult,
     Verdict,
 )
-from skillscan_trace.judge.orchestrator import _resolve, run_dual_judge
+from skillscan_trace.judge.orchestrator import _resolve
 from skillscan_trace.judge.judges import (
     _parse_verdict_json,
     _validate_verdict_dict,

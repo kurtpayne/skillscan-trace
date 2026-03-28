@@ -37,7 +37,6 @@ Example config file (no api_key field):
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 

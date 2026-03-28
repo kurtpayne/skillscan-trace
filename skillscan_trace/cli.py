@@ -242,7 +242,7 @@ def run(
 
     base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
     from skillscan_trace.formatters import (
-        format_json, format_sarif, format_text, format_batch_summary
+        format_sarif, format_batch_summary
     )
 
     # Collect skill files
@@ -468,7 +468,7 @@ def _display_report(report) -> None:
         console.print("[green]No findings — skill appears benign[/green]")
 
     if report.events:
-        console.print(f"\n[dim]Tool calls:[/dim]")
+        console.print("\n[dim]Tool calls:[/dim]")
         for e in report.events:
             finding_marker = " [red]⚠[/red]" if e.findings else ""
             args_preview = json.dumps(e.arguments)[:60]

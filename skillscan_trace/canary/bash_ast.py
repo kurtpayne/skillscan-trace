@@ -25,7 +25,7 @@ try:
 except ImportError:  # pragma: no cover
     _BASHLEX_AVAILABLE = False
 
-from skillscan_trace.models import Finding, Severity
+from skillscan_trace.models import Severity
 
 
 # ---------------------------------------------------------------------------
