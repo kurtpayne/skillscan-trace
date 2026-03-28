@@ -64,6 +64,24 @@ target-version = "py311"
 python_version = "3.11"
 strict = true
 
+[[tool.mypy.overrides]]
+module = "skillscan_trace.canary.bash_ast"
+# bashlex has no stubs; --ignore-missing-imports suppresses the import error
+# making type: ignore[import-untyped] unused. Disable unused-ignore here.
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = "skillscan_trace.judge.judges"
+# Optional SDK imports (anthropic) may or may not be installed; the
+# type: ignore comments are needed in some environments but not others.
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = "skillscan_trace.serve"
+# FastAPI's route decorators are untyped in some environments.
+# Disable decorator typing checks for the serve module.
+disallow_untyped_decorators = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
