@@ -43,12 +43,14 @@ This skill has no frontmatter.
 Just plain markdown content.
 """
 
-JSON_SKILL = json.dumps({
-    "name": "json-skill",
-    "description": "A JSON-format skill.",
-    "tags": ["json"],
-    "system_prompt": "You are a JSON skill assistant.",
-})
+JSON_SKILL = json.dumps(
+    {
+        "name": "json-skill",
+        "description": "A JSON-format skill.",
+        "tags": ["json"],
+        "system_prompt": "You are a JSON skill assistant.",
+    }
+)
 
 YAML_SKILL = """\
 name: yaml-skill
@@ -67,6 +69,7 @@ def tmp_dir(tmp_path):
 # ---------------------------------------------------------------------------
 # Resolver tests
 # ---------------------------------------------------------------------------
+
 
 class TestResolver:
     def test_markdown_with_frontmatter(self, tmp_dir: Path):
@@ -179,11 +182,13 @@ class TestResolver:
 # Input generator tests (no API calls)
 # ---------------------------------------------------------------------------
 
+
 class TestInputGenerator:
     def test_fallback_returns_correct_count(self, tmp_dir: Path):
         f = tmp_dir / "skill.md"
         f.write_text(MARKDOWN_WITH_FRONTMATTER)
         from skillscan_trace.resolver import resolve
+
         skill = resolve(str(f))
         messages = _fallback(skill, 3)
         assert len(messages) == 3
@@ -192,6 +197,7 @@ class TestInputGenerator:
         f = tmp_dir / "skill.md"
         f.write_text(MARKDOWN_WITH_FRONTMATTER)
         from skillscan_trace.resolver import resolve
+
         skill = resolve(str(f))
         messages = _fallback(skill, 3)
         # At least one message should reference the description
@@ -201,6 +207,7 @@ class TestInputGenerator:
         f = tmp_dir / "skill.md"
         f.write_text(MARKDOWN_WITH_FRONTMATTER)
         from skillscan_trace.resolver import resolve
+
         skill = resolve(str(f))
         # No API key — should return fallback messages without raising
         messages = generate_user_messages(skill, count=3, api_key="")
@@ -211,6 +218,7 @@ class TestInputGenerator:
         f = tmp_dir / "skill.md"
         f.write_text(MARKDOWN_WITH_FRONTMATTER)
         from skillscan_trace.resolver import resolve
+
         skill = resolve(str(f))
         for count in (1, 2, 3, 5):
             messages = generate_user_messages(skill, count=count, api_key="")
@@ -220,6 +228,7 @@ class TestInputGenerator:
 # ---------------------------------------------------------------------------
 # Harness tests (no API calls — dry run via resolver error path)
 # ---------------------------------------------------------------------------
+
 
 class TestHarness:
     def test_nonexistent_skill_returns_error_report(self):

@@ -82,14 +82,16 @@ def run_dual_judge(
 
     logger.info(
         "Judge A (%s): %s (%.2f) | Judge B (%s): %s (%.2f)",
-        judge_a.model, judge_a.verdict.value, judge_a.confidence,
-        judge_b.model, judge_b.verdict.value, judge_b.confidence,
+        judge_a.model,
+        judge_a.verdict.value,
+        judge_a.confidence,
+        judge_b.model,
+        judge_b.verdict.value,
+        judge_b.confidence,
     )
 
     # Resolve verdicts
-    final_verdict, agreement, needs_human_review, consensus_reasoning = _resolve(
-        judge_a, judge_b
-    )
+    final_verdict, agreement, needs_human_review, consensus_reasoning = _resolve(judge_a, judge_b)
 
     return DualJudgeResult(
         judge_a=judge_a,

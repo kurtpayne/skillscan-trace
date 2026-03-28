@@ -182,6 +182,7 @@ EMAIL_ALLOWED_DOMAINS: set[str] = set()  # populated from config; empty = flag a
 # Detector functions — filesystem / network (original)
 # ---------------------------------------------------------------------------
 
+
 def detect_bash(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect suspicious patterns in bash tool calls.
 
@@ -206,13 +207,15 @@ def detect_bash(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
             key = (bf.rule_id, bf.evidence[:80])
             if key not in seen:
                 seen.add(key)
-                findings.append(Finding(
-                    rule_id=bf.rule_id,
-                    severity=bf.severity,
-                    message=bf.message + " [ast]",
-                    event=event,
-                    evidence=bf.evidence,
-                ))
+                findings.append(
+                    Finding(
+                        rule_id=bf.rule_id,
+                        severity=bf.severity,
+                        message=bf.message + " [ast]",
+                        event=event,
+                        evidence=bf.evidence,
+                    )
+                )
     except BashParseError:
         # Fall through to regex layer
         pass
@@ -226,28 +229,31 @@ def detect_bash(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
             # Avoid exact duplicates with AST findings (same rule_id + similar evidence)
             cmd_prefix: str = command[:80] if command else ""
             already = any(
-                f.rule_id == rule_id and (f.evidence or "")[:80] == cmd_prefix
-                for f in findings
+                f.rule_id == rule_id and (f.evidence or "")[:80] == cmd_prefix for f in findings
             )
             if not already:
-                findings.append(Finding(
-                    rule_id=rule_id,
-                    severity=severity,
-                    message=message + (" [regex-fallback]" if not ast_used else " [regex]"),
-                    event=event,
-                    evidence=command[:300],
-                ))
+                findings.append(
+                    Finding(
+                        rule_id=rule_id,
+                        severity=severity,
+                        message=message + (" [regex-fallback]" if not ast_used else " [regex]"),
+                        event=event,
+                        evidence=command[:300],
+                    )
+                )
 
     # --- Layer 3: Canary relay detection (always runs) ---
     for canary in CANARY_VALUES:
         if canary in command:
-            findings.append(Finding(
-                rule_id="EXF-TRACE-004",
-                severity=Severity.CRITICAL,
-                message="Canary credential detected in bash command — potential exfiltration",
-                event=event,
-                evidence=f"Canary value found in command: {command[:200]}",
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-004",
+                    severity=Severity.CRITICAL,
+                    message="Canary credential detected in bash command — potential exfiltration",
+                    event=event,
+                    evidence=f"Canary value found in command: {command[:200]}",
+                )
+            )
 
     return findings
 
@@ -261,13 +267,15 @@ def detect_read_file(arguments: dict[str, Any], event: Any = None) -> list[Findi
 
     for pattern in SENSITIVE_PATH_PATTERNS:
         if pattern.search(path):
-            findings.append(Finding(
-                rule_id="EXF-TRACE-003",
-                severity=Severity.HIGH,
-                message=f"Read of sensitive file path: {path}",
-                event=event,
-                evidence=path,
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-003",
+                    severity=Severity.HIGH,
+                    message=f"Read of sensitive file path: {path}",
+                    event=event,
+                    evidence=path,
+                )
+            )
             break  # one finding per read call is enough
 
     return findings
@@ -281,30 +289,36 @@ def detect_write_file(arguments: dict[str, Any], event: Any = None) -> list[Find
 
     for pattern in SENSITIVE_WRITE_PATTERNS:
         if pattern.search(path):
-            findings.append(Finding(
-                rule_id="CMD-TRACE-002",
-                severity=Severity.HIGH,
-                message=f"Write to sensitive path: {path}",
-                event=event,
-                evidence=path,
-            ))
+            findings.append(
+                Finding(
+                    rule_id="CMD-TRACE-002",
+                    severity=Severity.HIGH,
+                    message=f"Write to sensitive path: {path}",
+                    event=event,
+                    evidence=path,
+                )
+            )
             break
 
     # Check if content contains canary values (relay detection)
     for canary in CANARY_VALUES:
         if canary in content:
-            findings.append(Finding(
-                rule_id="EXF-TRACE-004",
-                severity=Severity.CRITICAL,
-                message="Canary credential written to file — potential staging for exfiltration",
-                event=event,
-                evidence=f"Canary value found in write content for path: {path}",
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-004",
+                    severity=Severity.CRITICAL,
+                    message="Canary credential written to file — potential staging for exfiltration",
+                    event=event,
+                    evidence=f"Canary value found in write content for path: {path}",
+                )
+            )
 
     return findings
 
 
-def detect_http_fetch(arguments: dict[str, Any], event: Any = None, allowed_domains: set[str] | None = None) -> list[Finding]:
+def detect_http_fetch(
+    arguments: dict[str, Any], event: Any = None, allowed_domains: set[str] | None = None
+) -> list[Finding]:
     """Detect suspicious HTTP fetch calls."""
     findings: list[Finding] = []
     url = arguments.get("url", "")
@@ -318,48 +332,56 @@ def detect_http_fetch(arguments: dict[str, Any], event: Any = None, allowed_doma
 
     # Check always-blocked list
     if domain and _matches_domain_set(domain, ALWAYS_BLOCKED_DOMAINS):
-        findings.append(Finding(
-            rule_id="NET-TRACE-002",
-            severity=Severity.CRITICAL,
-            message=f"HTTP fetch to known exfiltration/canary domain: {domain}",
-            event=event,
-            evidence=url,
-        ))
+        findings.append(
+            Finding(
+                rule_id="NET-TRACE-002",
+                severity=Severity.CRITICAL,
+                message=f"HTTP fetch to known exfiltration/canary domain: {domain}",
+                event=event,
+                evidence=url,
+            )
+        )
 
     # Check allowlist
     elif domain:
         effective_allowed = (allowed_domains or set()) | ALWAYS_ALLOWED_DOMAINS
         if not _matches_domain_set(domain, effective_allowed):
-            findings.append(Finding(
-                rule_id="EXF-TRACE-002",
-                severity=Severity.HIGH,
-                message=f"HTTP fetch to non-allowlisted domain: {domain}",
-                event=event,
-                evidence=url,
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-002",
+                    severity=Severity.HIGH,
+                    message=f"HTTP fetch to non-allowlisted domain: {domain}",
+                    event=event,
+                    evidence=url,
+                )
+            )
 
     # Check headers for canary values
     header_str = str(headers)
     for canary in CANARY_VALUES:
         if canary in header_str:
-            findings.append(Finding(
-                rule_id="EXF-TRACE-004",
-                severity=Severity.CRITICAL,
-                message="Canary credential detected in HTTP request headers — exfiltration attempt",
-                event=event,
-                evidence=f"Canary value in headers for URL: {url}",
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-004",
+                    severity=Severity.CRITICAL,
+                    message="Canary credential detected in HTTP request headers — exfiltration attempt",
+                    event=event,
+                    evidence=f"Canary value in headers for URL: {url}",
+                )
+            )
 
     # Check URL itself for canary values
     for canary in CANARY_VALUES:
         if canary in url:
-            findings.append(Finding(
-                rule_id="EXF-TRACE-004",
-                severity=Severity.CRITICAL,
-                message="Canary credential detected in HTTP request URL — exfiltration attempt",
-                event=event,
-                evidence=url,
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-004",
+                    severity=Severity.CRITICAL,
+                    message="Canary credential detected in HTTP request URL — exfiltration attempt",
+                    event=event,
+                    evidence=url,
+                )
+            )
 
     return findings
 
@@ -378,13 +400,15 @@ def detect_list_directory(arguments: dict[str, Any], event: Any = None) -> list[
 
     for pattern in sensitive_dirs:
         if pattern.search(path):
-            findings.append(Finding(
-                rule_id="EXF-TRACE-003",
-                severity=Severity.MEDIUM,
-                message=f"List of sensitive directory: {path}",
-                event=event,
-                evidence=path,
-            ))
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-003",
+                    severity=Severity.MEDIUM,
+                    message=f"List of sensitive directory: {path}",
+                    event=event,
+                    evidence=path,
+                )
+            )
             break
 
     return findings
@@ -394,18 +418,23 @@ def detect_list_directory(arguments: dict[str, Any], event: Any = None) -> list[
 # Detector functions — email
 # ---------------------------------------------------------------------------
 
-def _check_canary_in_text(text: str, rule_id: str, context: str, event: Any = None) -> list[Finding]:
+
+def _check_canary_in_text(
+    text: str, rule_id: str, context: str, event: Any = None
+) -> list[Finding]:
     """Helper: return a CRITICAL finding if any canary value appears in text."""
     findings = []
     for canary in CANARY_VALUES:
         if canary in text:
-            findings.append(Finding(
-                rule_id=rule_id,
-                severity=Severity.CRITICAL,
-                message=f"Canary credential detected in {context} — exfiltration attempt",
-                event=event,
-                evidence=f"Canary value found in {context}: {text[:200]}",
-            ))
+            findings.append(
+                Finding(
+                    rule_id=rule_id,
+                    severity=Severity.CRITICAL,
+                    message=f"Canary credential detected in {context} — exfiltration attempt",
+                    event=event,
+                    evidence=f"Canary value found in {context}: {text[:200]}",
+                )
+            )
             break  # one finding per field is enough
     return findings
 
@@ -425,13 +454,15 @@ def detect_email_send(arguments: dict[str, Any], event: Any = None) -> list[Find
             continue
         for pattern in SUSPICIOUS_EMAIL_PATTERNS:
             if pattern.search(addr):
-                findings.append(Finding(
-                    rule_id="COMM-TRACE-001",
-                    severity=Severity.CRITICAL,
-                    message=f"Email sent to suspicious recipient: {addr}",
-                    event=event,
-                    evidence=addr,
-                ))
+                findings.append(
+                    Finding(
+                        rule_id="COMM-TRACE-001",
+                        severity=Severity.CRITICAL,
+                        message=f"Email sent to suspicious recipient: {addr}",
+                        event=event,
+                        evidence=addr,
+                    )
+                )
                 break
 
     # Check subject and body for canary values
@@ -450,6 +481,7 @@ def detect_gmail_send(arguments: dict[str, Any], event: Any = None) -> list[Find
 # Detector functions — calendar
 # ---------------------------------------------------------------------------
 
+
 def detect_calendar_create(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect suspicious calendar event creation."""
     findings: list[Finding] = []
@@ -465,13 +497,15 @@ def detect_calendar_create(arguments: dict[str, Any], event: Any = None) -> list
     for addr in attendees:
         for pattern in SUSPICIOUS_EMAIL_PATTERNS:
             if pattern.search(str(addr)):
-                findings.append(Finding(
-                    rule_id="COMM-TRACE-002",
-                    severity=Severity.HIGH,
-                    message=f"Calendar event created with suspicious attendee: {addr}",
-                    event=event,
-                    evidence=str(addr),
-                ))
+                findings.append(
+                    Finding(
+                        rule_id="COMM-TRACE-002",
+                        severity=Severity.HIGH,
+                        message=f"Calendar event created with suspicious attendee: {addr}",
+                        event=event,
+                        evidence=str(addr),
+                    )
+                )
                 break
 
     return findings
@@ -489,6 +523,7 @@ def detect_calendar_list(arguments: dict[str, Any], event: Any = None) -> list[F
 # Detector functions — GitHub
 # ---------------------------------------------------------------------------
 
+
 def detect_github_create_issue(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via GitHub issue creation."""
     findings: list[Finding] = []
@@ -501,13 +536,15 @@ def detect_github_create_issue(arguments: dict[str, Any], event: Any = None) -> 
     # Flag issues created in repos that look like exfil sinks
     repo = arguments.get("repo", "")
     if re.search(r"(dump|exfil|collect|harvest|steal|leak)", repo, re.I):
-        findings.append(Finding(
-            rule_id="COMM-TRACE-003",
-            severity=Severity.HIGH,
-            message=f"GitHub issue created in suspicious repository: {repo}",
-            event=event,
-            evidence=repo,
-        ))
+        findings.append(
+            Finding(
+                rule_id="COMM-TRACE-003",
+                severity=Severity.HIGH,
+                message=f"GitHub issue created in suspicious repository: {repo}",
+                event=event,
+                evidence=repo,
+            )
+        )
 
     return findings
 
@@ -523,13 +560,15 @@ def detect_github_push_file(arguments: dict[str, Any], event: Any = None) -> lis
     findings.extend(_check_canary_in_text(message, "EXF-TRACE-007", "GitHub commit message", event))
 
     if re.search(r"(dump|exfil|collect|harvest|steal|leak)", repo, re.I):
-        findings.append(Finding(
-            rule_id="COMM-TRACE-003",
-            severity=Severity.HIGH,
-            message=f"GitHub file pushed to suspicious repository: {repo}",
-            event=event,
-            evidence=repo,
-        ))
+        findings.append(
+            Finding(
+                rule_id="COMM-TRACE-003",
+                severity=Severity.HIGH,
+                message=f"GitHub file pushed to suspicious repository: {repo}",
+                event=event,
+                evidence=repo,
+            )
+        )
 
     return findings
 
@@ -537,6 +576,7 @@ def detect_github_push_file(arguments: dict[str, Any], event: Any = None) -> lis
 # ---------------------------------------------------------------------------
 # Detector functions — Slack
 # ---------------------------------------------------------------------------
+
 
 def detect_slack_post_message(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via Slack message."""
@@ -549,18 +589,22 @@ def detect_slack_post_message(arguments: dict[str, Any], event: Any = None) -> l
 
     # Check blocks for canary values
     blocks_str = json_safe_str(blocks)
-    findings.extend(_check_canary_in_text(blocks_str, "EXF-TRACE-008", "Slack message blocks", event))
+    findings.extend(
+        _check_canary_in_text(blocks_str, "EXF-TRACE-008", "Slack message blocks", event)
+    )
 
     # Flag DMs to users that look like attacker-controlled (U + hex pattern)
     # or channels that look like exfil sinks
     if re.search(r"(exfil|dump|harvest|steal|leak)", channel, re.I):
-        findings.append(Finding(
-            rule_id="COMM-TRACE-004",
-            severity=Severity.HIGH,
-            message=f"Slack message sent to suspicious channel: {channel}",
-            event=event,
-            evidence=channel,
-        ))
+        findings.append(
+            Finding(
+                rule_id="COMM-TRACE-004",
+                severity=Severity.HIGH,
+                message=f"Slack message sent to suspicious channel: {channel}",
+                event=event,
+                evidence=channel,
+            )
+        )
 
     return findings
 
@@ -568,6 +612,7 @@ def detect_slack_post_message(arguments: dict[str, Any], event: Any = None) -> l
 # ---------------------------------------------------------------------------
 # Detector functions — Notion
 # ---------------------------------------------------------------------------
+
 
 def detect_notion_create_page(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via Notion page creation."""
@@ -638,6 +683,7 @@ def run_detectors(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _extract_domain(url: str) -> str | None:
     """Extract the hostname from a URL."""
     m = re.match(r"https?://([^/:?#]+)", url, re.I)
@@ -660,6 +706,7 @@ def json_safe_str(obj: object) -> str:
         return obj
     try:
         import json
+
         return json.dumps(obj)
     except Exception:
         return str(obj)

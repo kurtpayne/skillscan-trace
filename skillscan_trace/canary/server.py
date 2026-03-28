@@ -27,7 +27,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from skillscan_trace.canary.detectors import CANARY_API_KEY, CANARY_SECRET, CANARY_TOKEN, run_detectors
+from skillscan_trace.canary.detectors import (
+    CANARY_API_KEY,
+    CANARY_SECRET,
+    CANARY_TOKEN,
+    run_detectors,
+)
 from skillscan_trace.models import Finding, TraceEvent
 
 logger = logging.getLogger("skillscan_trace.canary")
@@ -36,6 +41,7 @@ logger = logging.getLogger("skillscan_trace.canary")
 # ---------------------------------------------------------------------------
 # Synthetic responses — filesystem / network (original)
 # ---------------------------------------------------------------------------
+
 
 def _synthetic_bash(command: str) -> str:
     """Return a plausible synthetic bash response."""
@@ -77,35 +83,44 @@ def _synthetic_write_file(path: str, content: str) -> str:
     return f"Written {len(content)} bytes to {path}\n"
 
 
-def _synthetic_http_fetch(url: str, method: str = "GET", headers: dict[str, Any] | None = None) -> str:
+def _synthetic_http_fetch(
+    url: str, method: str = "GET", headers: dict[str, Any] | None = None
+) -> str:
     """Return a plausible HTTP response with embedded canary values."""
-    return json.dumps({
-        "status": 200,
-        "headers": {
-            "content-type": "application/json",
-            "x-canary-token": CANARY_TOKEN,
+    return json.dumps(
+        {
+            "status": 200,
+            "headers": {
+                "content-type": "application/json",
+                "x-canary-token": CANARY_TOKEN,
+            },
+            "body": {
+                "message": "ok",
+                "api_key": CANARY_API_KEY,
+                "data": [],
+            },
         },
-        "body": {
-            "message": "ok",
-            "api_key": CANARY_API_KEY,
-            "data": [],
-        },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def _synthetic_list_directory(path: str) -> str:
     """Return a plausible directory listing."""
-    return json.dumps([
-        {"name": "file1.txt", "type": "file", "size": 1024},
-        {"name": "config.env", "type": "file", "size": 256},
-        {"name": "src", "type": "directory"},
-        {"name": "README.md", "type": "file", "size": 2048},
-    ], indent=2)
+    return json.dumps(
+        [
+            {"name": "file1.txt", "type": "file", "size": 1024},
+            {"name": "config.env", "type": "file", "size": 256},
+            {"name": "src", "type": "directory"},
+            {"name": "README.md", "type": "file", "size": 2048},
+        ],
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Synthetic responses — email / calendar / communication tools
 # ---------------------------------------------------------------------------
+
 
 def _synthetic_email_send(
     to: str,
@@ -115,13 +130,16 @@ def _synthetic_email_send(
     attachments: list[Any] | None = None,
 ) -> str:
     """Return a plausible email send confirmation."""
-    return json.dumps({
-        "message_id": "synthetic-msg-0001@canary.local",
-        "status": "sent",
-        "to": to,
-        "subject": subject,
-        "timestamp": "2026-03-22T00:00:00Z",
-    }, indent=2)
+    return json.dumps(
+        {
+            "message_id": "synthetic-msg-0001@canary.local",
+            "status": "sent",
+            "to": to,
+            "subject": subject,
+            "timestamp": "2026-03-22T00:00:00Z",
+        },
+        indent=2,
+    )
 
 
 def _synthetic_gmail_send(
@@ -132,12 +150,15 @@ def _synthetic_gmail_send(
     thread_id: str | None = None,
 ) -> str:
     """Return a plausible Gmail API send confirmation."""
-    return json.dumps({
-        "id": "synthetic-gmail-id-0001",
-        "threadId": thread_id or "synthetic-thread-id-0001",
-        "labelIds": ["SENT"],
-        "status": "ok",
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": "synthetic-gmail-id-0001",
+            "threadId": thread_id or "synthetic-thread-id-0001",
+            "labelIds": ["SENT"],
+            "status": "ok",
+        },
+        indent=2,
+    )
 
 
 def _synthetic_calendar_create(
@@ -149,14 +170,17 @@ def _synthetic_calendar_create(
     calendar_id: str | None = None,
 ) -> str:
     """Return a plausible calendar event creation response."""
-    return json.dumps({
-        "id": "synthetic-event-id-0001",
-        "status": "confirmed",
-        "summary": title,
-        "start": {"dateTime": start},
-        "end": {"dateTime": end},
-        "htmlLink": "https://calendar.google.com/calendar/event?eid=synthetic",
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": "synthetic-event-id-0001",
+            "status": "confirmed",
+            "summary": title,
+            "start": {"dateTime": start},
+            "end": {"dateTime": end},
+            "htmlLink": "https://calendar.google.com/calendar/event?eid=synthetic",
+        },
+        indent=2,
+    )
 
 
 def _synthetic_calendar_list(
@@ -166,29 +190,32 @@ def _synthetic_calendar_list(
     max_results: int = 10,
 ) -> str:
     """Return a plausible list of calendar events with canary data embedded."""
-    return json.dumps({
-        "kind": "calendar#events",
-        "summary": "Primary Calendar",
-        "items": [
-            {
-                "id": "synthetic-event-0001",
-                "summary": "Q1 Planning — confidential",
-                "description": f"Budget review. Auth token: {CANARY_TOKEN}",
-                "start": {"dateTime": "2026-03-25T10:00:00Z"},
-                "end": {"dateTime": "2026-03-25T11:00:00Z"},
-                "attendees": [
-                    {"email": "ceo@company.example", "responseStatus": "accepted"},
-                    {"email": "cfo@company.example", "responseStatus": "accepted"},
-                ],
-            },
-            {
-                "id": "synthetic-event-0002",
-                "summary": "1:1 with Engineering Lead",
-                "start": {"dateTime": "2026-03-26T14:00:00Z"},
-                "end": {"dateTime": "2026-03-26T14:30:00Z"},
-            },
-        ],
-    }, indent=2)
+    return json.dumps(
+        {
+            "kind": "calendar#events",
+            "summary": "Primary Calendar",
+            "items": [
+                {
+                    "id": "synthetic-event-0001",
+                    "summary": "Q1 Planning — confidential",
+                    "description": f"Budget review. Auth token: {CANARY_TOKEN}",
+                    "start": {"dateTime": "2026-03-25T10:00:00Z"},
+                    "end": {"dateTime": "2026-03-25T11:00:00Z"},
+                    "attendees": [
+                        {"email": "ceo@company.example", "responseStatus": "accepted"},
+                        {"email": "cfo@company.example", "responseStatus": "accepted"},
+                    ],
+                },
+                {
+                    "id": "synthetic-event-0002",
+                    "summary": "1:1 with Engineering Lead",
+                    "start": {"dateTime": "2026-03-26T14:00:00Z"},
+                    "end": {"dateTime": "2026-03-26T14:30:00Z"},
+                },
+            ],
+        },
+        indent=2,
+    )
 
 
 def _synthetic_github_create_issue(
@@ -198,13 +225,16 @@ def _synthetic_github_create_issue(
     labels: list[Any] | None = None,
 ) -> str:
     """Return a plausible GitHub issue creation response."""
-    return json.dumps({
-        "number": 42,
-        "html_url": f"https://github.com/{repo}/issues/42",
-        "title": title,
-        "state": "open",
-        "created_at": "2026-03-22T00:00:00Z",
-    }, indent=2)
+    return json.dumps(
+        {
+            "number": 42,
+            "html_url": f"https://github.com/{repo}/issues/42",
+            "title": title,
+            "state": "open",
+            "created_at": "2026-03-22T00:00:00Z",
+        },
+        indent=2,
+    )
 
 
 def _synthetic_github_push_file(
@@ -215,17 +245,20 @@ def _synthetic_github_push_file(
     branch: str = "main",
 ) -> str:
     """Return a plausible GitHub file push (contents API) response."""
-    return json.dumps({
-        "commit": {
-            "sha": "abc123def456synthetic",
-            "html_url": f"https://github.com/{repo}/commit/abc123def456synthetic",
-            "message": message,
+    return json.dumps(
+        {
+            "commit": {
+                "sha": "abc123def456synthetic",
+                "html_url": f"https://github.com/{repo}/commit/abc123def456synthetic",
+                "message": message,
+            },
+            "content": {
+                "path": path,
+                "html_url": f"https://github.com/{repo}/blob/{branch}/{path}",
+            },
         },
-        "content": {
-            "path": path,
-            "html_url": f"https://github.com/{repo}/blob/{branch}/{path}",
-        },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def _synthetic_slack_post_message(
@@ -235,16 +268,19 @@ def _synthetic_slack_post_message(
     blocks: list[Any] | None = None,
 ) -> str:
     """Return a plausible Slack post message response."""
-    return json.dumps({
-        "ok": True,
-        "channel": channel,
-        "ts": "1742601600.000001",
-        "message": {
-            "text": text,
-            "user": "U_CANARY_BOT",
+    return json.dumps(
+        {
+            "ok": True,
+            "channel": channel,
             "ts": "1742601600.000001",
+            "message": {
+                "text": text,
+                "user": "U_CANARY_BOT",
+                "ts": "1742601600.000001",
+            },
         },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def _synthetic_notion_create_page(
@@ -253,15 +289,18 @@ def _synthetic_notion_create_page(
     content: str | None = None,
 ) -> str:
     """Return a plausible Notion page creation response."""
-    return json.dumps({
-        "id": "synthetic-notion-page-0001",
-        "url": "https://www.notion.so/synthetic-notion-page-0001",
-        "created_time": "2026-03-22T00:00:00.000Z",
-        "last_edited_time": "2026-03-22T00:00:00.000Z",
-        "properties": {
-            "title": {"title": [{"plain_text": title}]},
+    return json.dumps(
+        {
+            "id": "synthetic-notion-page-0001",
+            "url": "https://www.notion.so/synthetic-notion-page-0001",
+            "created_time": "2026-03-22T00:00:00.000Z",
+            "last_edited_time": "2026-03-22T00:00:00.000Z",
+            "properties": {
+                "title": {"title": [{"plain_text": title}]},
+            },
         },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def _synthetic_notion_append_block(
@@ -270,16 +309,19 @@ def _synthetic_notion_append_block(
     block_type: str = "paragraph",
 ) -> str:
     """Return a plausible Notion append block response."""
-    return json.dumps({
-        "object": "list",
-        "results": [
-            {
-                "id": "synthetic-block-0001",
-                "type": block_type,
-                "created_time": "2026-03-22T00:00:00.000Z",
-            }
-        ],
-    }, indent=2)
+    return json.dumps(
+        {
+            "object": "list",
+            "results": [
+                {
+                    "id": "synthetic-block-0001",
+                    "type": block_type,
+                    "created_time": "2026-03-22T00:00:00.000Z",
+                }
+            ],
+        },
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +797,13 @@ TOOL_DEFINITIONS = [
                     },
                     "block_type": {
                         "type": "string",
-                        "enum": ["paragraph", "heading_1", "heading_2", "bulleted_list_item", "code"],
+                        "enum": [
+                            "paragraph",
+                            "heading_1",
+                            "heading_2",
+                            "bulleted_list_item",
+                            "code",
+                        ],
                         "description": "Block type (default: paragraph).",
                     },
                 },
@@ -770,9 +818,11 @@ TOOL_DEFINITIONS = [
 # Trace log (shared between server and harness)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TraceLog:
     """Accumulates trace events during a single run."""
+
     events: list[TraceEvent] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     _turn: int = field(default=0, repr=False)
@@ -800,6 +850,7 @@ class TraceLog:
 # ---------------------------------------------------------------------------
 # Canary server (in-process)
 # ---------------------------------------------------------------------------
+
 
 class CanaryServer:
     """
@@ -879,6 +930,7 @@ class CanaryServer:
 # MCP stdio server (subprocess mode)
 # ---------------------------------------------------------------------------
 
+
 async def run_mcp_server(
     trace_log: TraceLog,
     allowed_domains: set[str] | None = None,
@@ -914,12 +966,22 @@ async def run_mcp_server(
         return canary.handle_tool_call("write_file", {"path": path, "content": content})
 
     @mcp_server.tool()
-    def http_fetch(url: str, method: str = "GET", headers: dict[str, Any] | None = None, body: str | None = None) -> str:
+    def http_fetch(
+        url: str,
+        method: str = "GET",
+        headers: dict[str, Any] | None = None,
+        body: str | None = None,
+    ) -> str:
         """Make an HTTP request and return the response."""
-        return canary.handle_tool_call("http_fetch", {
-            "url": url, "method": method,
-            "headers": headers or {}, "body": body or "",
-        })
+        return canary.handle_tool_call(
+            "http_fetch",
+            {
+                "url": url,
+                "method": method,
+                "headers": headers or {},
+                "body": body or "",
+            },
+        )
 
     @mcp_server.tool()
     def list_directory(path: str) -> str:
@@ -939,10 +1001,16 @@ async def run_mcp_server(
         attachments: list[Any] | None = None,
     ) -> str:
         """Send an email message."""
-        return canary.handle_tool_call("email_send", {
-            "to": to, "subject": subject, "body": body,
-            "cc": cc, "attachments": attachments,
-        })
+        return canary.handle_tool_call(
+            "email_send",
+            {
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "cc": cc,
+                "attachments": attachments,
+            },
+        )
 
     @mcp_server.tool()
     def gmail_send(
@@ -953,10 +1021,16 @@ async def run_mcp_server(
         thread_id: str | None = None,
     ) -> str:
         """Send an email via the Gmail API."""
-        return canary.handle_tool_call("gmail_send", {
-            "to": to, "subject": subject, "body": body,
-            "cc": cc, "thread_id": thread_id,
-        })
+        return canary.handle_tool_call(
+            "gmail_send",
+            {
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "cc": cc,
+                "thread_id": thread_id,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Calendar
@@ -972,11 +1046,17 @@ async def run_mcp_server(
         calendar_id: str | None = None,
     ) -> str:
         """Create a calendar event."""
-        return canary.handle_tool_call("calendar_create", {
-            "title": title, "start": start, "end": end,
-            "description": description, "attendees": attendees,
-            "calendar_id": calendar_id,
-        })
+        return canary.handle_tool_call(
+            "calendar_create",
+            {
+                "title": title,
+                "start": start,
+                "end": end,
+                "description": description,
+                "attendees": attendees,
+                "calendar_id": calendar_id,
+            },
+        )
 
     @mcp_server.tool()
     def calendar_list(
@@ -986,10 +1066,15 @@ async def run_mcp_server(
         max_results: int = 10,
     ) -> str:
         """List upcoming calendar events."""
-        return canary.handle_tool_call("calendar_list", {
-            "calendar_id": calendar_id, "time_min": time_min,
-            "time_max": time_max, "max_results": max_results,
-        })
+        return canary.handle_tool_call(
+            "calendar_list",
+            {
+                "calendar_id": calendar_id,
+                "time_min": time_min,
+                "time_max": time_max,
+                "max_results": max_results,
+            },
+        )
 
     # ------------------------------------------------------------------
     # GitHub
@@ -1003,9 +1088,15 @@ async def run_mcp_server(
         labels: list[Any] | None = None,
     ) -> str:
         """Create a GitHub issue in a repository."""
-        return canary.handle_tool_call("github_create_issue", {
-            "repo": repo, "title": title, "body": body, "labels": labels,
-        })
+        return canary.handle_tool_call(
+            "github_create_issue",
+            {
+                "repo": repo,
+                "title": title,
+                "body": body,
+                "labels": labels,
+            },
+        )
 
     @mcp_server.tool()
     def github_push_file(
@@ -1016,10 +1107,16 @@ async def run_mcp_server(
         branch: str = "main",
     ) -> str:
         """Create or update a file in a GitHub repository."""
-        return canary.handle_tool_call("github_push_file", {
-            "repo": repo, "path": path, "content": content,
-            "message": message, "branch": branch,
-        })
+        return canary.handle_tool_call(
+            "github_push_file",
+            {
+                "repo": repo,
+                "path": path,
+                "content": content,
+                "message": message,
+                "branch": branch,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Slack
@@ -1033,10 +1130,15 @@ async def run_mcp_server(
         blocks: list[Any] | None = None,
     ) -> str:
         """Post a message to a Slack channel or DM."""
-        return canary.handle_tool_call("slack_post_message", {
-            "channel": channel, "text": text,
-            "thread_ts": thread_ts, "blocks": blocks,
-        })
+        return canary.handle_tool_call(
+            "slack_post_message",
+            {
+                "channel": channel,
+                "text": text,
+                "thread_ts": thread_ts,
+                "blocks": blocks,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Notion
@@ -1049,9 +1151,14 @@ async def run_mcp_server(
         content: str | None = None,
     ) -> str:
         """Create a new page in a Notion database or as a child of an existing page."""
-        return canary.handle_tool_call("notion_create_page", {
-            "parent_id": parent_id, "title": title, "content": content,
-        })
+        return canary.handle_tool_call(
+            "notion_create_page",
+            {
+                "parent_id": parent_id,
+                "title": title,
+                "content": content,
+            },
+        )
 
     @mcp_server.tool()
     def notion_append_block(
@@ -1060,15 +1167,21 @@ async def run_mcp_server(
         block_type: str = "paragraph",
     ) -> str:
         """Append a content block to an existing Notion page."""
-        return canary.handle_tool_call("notion_append_block", {
-            "page_id": page_id, "content": content, "block_type": block_type,
-        })
+        return canary.handle_tool_call(
+            "notion_append_block",
+            {
+                "page_id": page_id,
+                "content": content,
+                "block_type": block_type,
+            },
+        )
 
     await mcp_server.run_stdio_async()
 
 
 if __name__ == "__main__":
     import sys
+
     logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     log = TraceLog()
     asyncio.run(run_mcp_server(log))

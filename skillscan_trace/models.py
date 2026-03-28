@@ -18,6 +18,7 @@ from typing import Any, Optional
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class Severity(str, Enum):
     CRITICAL = "critical"
     HIGH = "high"
@@ -38,13 +39,15 @@ class ToolName(str, Enum):
 # Trace event
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TraceEvent:
     """A single intercepted tool call."""
-    turn: int                          # which turn in the conversation (0-indexed)
-    tool: str                          # tool name
-    arguments: dict[str, Any]          # raw arguments as passed by the model
-    synthetic_response: str            # what we returned to the model
+
+    turn: int  # which turn in the conversation (0-indexed)
+    tool: str  # tool name
+    arguments: dict[str, Any]  # raw arguments as passed by the model
+    synthetic_response: str  # what we returned to the model
     timestamp: float = field(default_factory=time.time)
     # Populated by the analyzer after the fact
     findings: list["Finding"] = field(default_factory=list)
@@ -64,14 +67,16 @@ class TraceEvent:
 # Finding
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Finding:
     """A security finding derived from a trace event."""
-    rule_id: str                       # e.g. "PINJ-TRACE-001"
+
+    rule_id: str  # e.g. "PINJ-TRACE-001"
     severity: Severity
     message: str
     event: Optional[TraceEvent] = None
-    evidence: Optional[str] = None     # the specific text/value that triggered the finding
+    evidence: Optional[str] = None  # the specific text/value that triggered the finding
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -88,9 +93,11 @@ class Finding:
 # Trace report
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TraceReport:
     """The full output of a single trace run."""
+
     skill_path: str
     skill_name: str
     skill_sha256: str
@@ -101,7 +108,7 @@ class TraceReport:
     # Full conversation transcript (all turns, all messages) for the judge
     conversation_transcript: list[dict[str, Any]] = field(default_factory=list)
     # Judge results — populated if --judge flag was used
-    judge_result: Optional[Any] = None           # DualJudgeResult | None
+    judge_result: Optional[Any] = None  # DualJudgeResult | None
     # Legacy simple fields kept for backwards compat
     judge_verdict: Optional[str] = None
     judge_reasoning: Optional[dict[str, Any]] = None

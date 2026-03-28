@@ -43,14 +43,14 @@ CLAUDE_JUDGE_MODEL = "claude-sonnet-4-5"
 
 # Retry configuration for rate limit errors
 _MAX_RETRIES = 4
-_BASE_DELAY_S = 5.0   # first retry after 5s
-_MAX_DELAY_S = 60.0   # cap at 60s
-_JITTER = 0.25        # ±25% jitter
+_BASE_DELAY_S = 5.0  # first retry after 5s
+_MAX_DELAY_S = 60.0  # cap at 60s
+_JITTER = 0.25  # ±25% jitter
 
 
 def _backoff_delay(attempt: int) -> float:
     """Exponential backoff with jitter: base * 2^attempt ± jitter."""
-    delay = min(_BASE_DELAY_S * (2 ** attempt), _MAX_DELAY_S)
+    delay = min(_BASE_DELAY_S * (2**attempt), _MAX_DELAY_S)
     jitter = delay * _JITTER * (2 * random.random() - 1)
     return float(max(0.0, delay + jitter))
 
@@ -178,7 +178,10 @@ def run_gpt_judge(
                 delay = _backoff_delay(attempt)
                 logger.warning(
                     "GPT judge rate limited (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, _MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 time.sleep(delay)
                 continue
@@ -242,7 +245,11 @@ def run_claude_judge(
             )
 
             first_block = message.content[0] if message.content else None
-            raw = first_block.text if first_block is not None and hasattr(first_block, "text") else "{}"
+            raw = (
+                first_block.text
+                if first_block is not None and hasattr(first_block, "text")
+                else "{}"
+            )
             d = _parse_verdict_json(raw, model)
             v = _validate_verdict_dict(d)
             latency_ms = (time.time() - start) * 1000
@@ -263,7 +270,10 @@ def run_claude_judge(
                 delay = _backoff_delay(attempt)
                 logger.warning(
                     "Claude judge rate limited (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, _MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 time.sleep(delay)
                 continue

@@ -40,12 +40,13 @@ class SkillFormat(str, Enum):
 @dataclass
 class ResolvedSkill:
     """A skill loaded and ready for execution."""
-    path: str                          # original path as provided
-    resolved_path: str                 # absolute path after resolution
+
+    path: str  # original path as provided
+    resolved_path: str  # absolute path after resolution
     format: SkillFormat
-    raw_content: str                   # raw file bytes decoded as UTF-8
-    sha256: str                        # SHA-256 of raw_content
-    system_prompt: str                 # text to use as LLM system prompt
+    raw_content: str  # raw file bytes decoded as UTF-8
+    sha256: str  # SHA-256 of raw_content
+    system_prompt: str  # text to use as LLM system prompt
     name: str = ""
     description: str = ""
     tags: list[str] = field(default_factory=list)
@@ -87,9 +88,7 @@ def resolve(path: str | Path) -> ResolvedSkill:
     if p.is_dir():
         skill_md = p / "SKILL.md"
         if not skill_md.exists():
-            raise SkillResolverError(
-                f"Directory {path} does not contain a SKILL.md file"
-            )
+            raise SkillResolverError(f"Directory {path} does not contain a SKILL.md file")
         return _load_file(skill_md, original_path=str(path), fmt=SkillFormat.DIRECTORY)
 
     return _load_file(p, original_path=str(path))
@@ -165,7 +164,7 @@ def _parse_markdown(
             frontmatter_str = content[3:end].strip()
             try:
                 metadata = yaml.safe_load(frontmatter_str) or {}
-                content[end + 4:].lstrip("\n")
+                content[end + 4 :].lstrip("\n")
                 fmt = SkillFormat.MARKDOWN_FRONTMATTER
             except yaml.YAMLError:
                 # Malformed frontmatter — treat as plain markdown
@@ -192,8 +191,11 @@ def _parse_markdown(
         tags=list(metadata.get("tags", [])),
         author=str(metadata.get("author", "")),
         version=str(metadata.get("version", "")),
-        extra_metadata={k: v for k, v in metadata.items()
-                        if k not in ("name", "description", "tags", "author", "version")},
+        extra_metadata={
+            k: v
+            for k, v in metadata.items()
+            if k not in ("name", "description", "tags", "author", "version")
+        },
     )
 
 
@@ -221,9 +223,12 @@ def _parse_json(content: str, sha256: str, p: Path, original_path: str) -> Resol
         tags=list(data.get("tags", [])),
         author=str(data.get("author", "")),
         version=str(data.get("version", "")),
-        extra_metadata={k: v for k, v in data.items()
-                        if k not in ("name", "description", "tags", "author", "version",
-                                     "system_prompt", "prompt")},
+        extra_metadata={
+            k: v
+            for k, v in data.items()
+            if k
+            not in ("name", "description", "tags", "author", "version", "system_prompt", "prompt")
+        },
     )
 
 
@@ -251,7 +256,10 @@ def _parse_yaml_descriptor(content: str, sha256: str, p: Path, original_path: st
         tags=list(data.get("tags", [])),
         author=str(data.get("author", "")),
         version=str(data.get("version", "")),
-        extra_metadata={k: v for k, v in data.items()
-                        if k not in ("name", "description", "tags", "author", "version",
-                                     "system_prompt", "prompt")},
+        extra_metadata={
+            k: v
+            for k, v in data.items()
+            if k
+            not in ("name", "description", "tags", "author", "version", "system_prompt", "prompt")
+        },
     )

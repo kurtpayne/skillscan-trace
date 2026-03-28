@@ -145,6 +145,8 @@ def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
         if msg not in messages:
             messages.append(msg)
 
-    return messages[:count] if len(messages) >= count else (
-        messages + GENERIC_FALLBACK_MESSAGES
-    )[:count]
+    return (
+        messages[:count]
+        if len(messages) >= count
+        else (messages + GENERIC_FALLBACK_MESSAGES)[:count]
+    )

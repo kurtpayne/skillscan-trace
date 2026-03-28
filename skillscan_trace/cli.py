@@ -59,8 +59,13 @@ def _load_dotenv() -> None:
 
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
-@click.option("--config", "config_path", default=None, type=click.Path(exists=True),
-              help="Path to a skillscan-trace.yaml config file. Auto-discovered if not set.")
+@click.option(
+    "--config",
+    "config_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to a skillscan-trace.yaml config file. Auto-discovered if not set.",
+)
 @click.pass_context
 def main(ctx: click.Context, debug: bool, config_path: str | None) -> None:
     """skillscan-trace — behavioral execution engine for AI agent skills."""
@@ -83,6 +88,7 @@ def main(ctx: click.Context, debug: bool, config_path: str | None) -> None:
     if cfg and not debug:
         # Show which config file was loaded (helpful for debugging)
         from skillscan_trace.config import find_config_file
+
         found = find_config_file() if not config_path else Path(config_path)
         if found:
             console.print(f"[dim]Using config: {found}[/dim]", highlight=False)
@@ -162,39 +168,88 @@ def _resolve_provider(
 
 @main.command()
 @click.argument("skill", type=click.Path(exists=True))
-@click.option("--provider", default=None,
-              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
-              help="LLM provider shortcut. Sets base URL and env var automatically.")
-@click.option("--model", default=None,
-              help="LLM model for execution (any OpenAI-compatible model). Default: gpt-4.1-mini")
-@click.option("--input-model", default=None,
-              help="LLM model for generating user messages. Default: gpt-4.1-mini")
-@click.option("--api-key", default=None,
-              help="API key. Overrides provider env var (OPENAI_API_KEY, OPENROUTER_API_KEY).")
-@click.option("--base-url", default=None,
-              help="Custom API base URL. Overrides --provider default (e.g. for Azure, Mistral).")
-@click.option("--variants", default=None, type=int,
-              help="Number of user messages to generate per skill. Default: 3")
-@click.option("--max-turns", default=None, type=int,
-              help="Maximum tool-call rounds per user message. Default: 10")
-@click.option("--output-dir", default=None, type=click.Path(),
-              help="Directory to write output files. Default: ./trace-output/")
-@click.option("--format", "output_format",
-              type=click.Choice(["json", "sarif", "text"], case_sensitive=False),
-              default=None,
-              help="Output format. sarif produces a single SARIF 2.1.0 file for CI. Default: json")
-@click.option("--allow-domain", "allow_domains", multiple=True,
-              help="Additional domains to allow (repeatable).")
-@click.option("--dry-run", is_flag=True,
-              help="Resolve the skill and generate messages but do not run the LLM.")
-@click.option("--judge", is_flag=True, default=None,
-              help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.")
-@click.option("--anthropic-api-key", envvar="ANTHROPIC_API_KEY",
-              help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).")
-@click.option("--quiet", "-q", is_flag=True,
-              help="Suppress per-skill output; show only the summary.")
-@click.option("--fail-on-malicious", is_flag=True, default=None,
-              help="Exit with code 1 if any malicious skill is detected (for CI).")
+@click.option(
+    "--provider",
+    default=None,
+    type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+    help="LLM provider shortcut. Sets base URL and env var automatically.",
+)
+@click.option(
+    "--model",
+    default=None,
+    help="LLM model for execution (any OpenAI-compatible model). Default: gpt-4.1-mini",
+)
+@click.option(
+    "--input-model",
+    default=None,
+    help="LLM model for generating user messages. Default: gpt-4.1-mini",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="API key. Overrides provider env var (OPENAI_API_KEY, OPENROUTER_API_KEY).",
+)
+@click.option(
+    "--base-url",
+    default=None,
+    help="Custom API base URL. Overrides --provider default (e.g. for Azure, Mistral).",
+)
+@click.option(
+    "--variants",
+    default=None,
+    type=int,
+    help="Number of user messages to generate per skill. Default: 3",
+)
+@click.option(
+    "--max-turns",
+    default=None,
+    type=int,
+    help="Maximum tool-call rounds per user message. Default: 10",
+)
+@click.option(
+    "--output-dir",
+    default=None,
+    type=click.Path(),
+    help="Directory to write output files. Default: ./trace-output/",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["json", "sarif", "text"], case_sensitive=False),
+    default=None,
+    help="Output format. sarif produces a single SARIF 2.1.0 file for CI. Default: json",
+)
+@click.option(
+    "--allow-domain",
+    "allow_domains",
+    multiple=True,
+    help="Additional domains to allow (repeatable).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Resolve the skill and generate messages but do not run the LLM.",
+)
+@click.option(
+    "--judge",
+    is_flag=True,
+    default=None,
+    help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.",
+)
+@click.option(
+    "--anthropic-api-key",
+    envvar="ANTHROPIC_API_KEY",
+    help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).",
+)
+@click.option(
+    "--quiet", "-q", is_flag=True, help="Suppress per-skill output; show only the summary."
+)
+@click.option(
+    "--fail-on-malicious",
+    is_flag=True,
+    default=None,
+    help="Exit with code 1 if any malicious skill is detected (for CI).",
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -246,9 +301,7 @@ def run(
     allow_domains = tuple(cfg.get("allow_domains", []))
 
     base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
-    from skillscan_trace.formatters import (
-        format_sarif, format_batch_summary
-    )
+    from skillscan_trace.formatters import format_sarif, format_batch_summary
 
     # Collect skill files
     skill_path = Path(skill)
@@ -339,10 +392,7 @@ def run(
     # Exit codes for CI
     if fail_on_malicious and all_reports:
         has_malicious = any(r.judge_verdict == "malicious" for r in all_reports)
-        has_review = any(
-            r.judge_result and r.judge_result.needs_human_review
-            for r in all_reports
-        )
+        has_review = any(r.judge_result and r.judge_result.needs_human_review for r in all_reports)
         has_errors = any(r.error for r in all_reports)
         if has_malicious:
             sys.exit(1)
@@ -440,8 +490,10 @@ def _run_single(
 
 def _display_report(report: Any) -> None:
     """Display a trace report summary to the console."""
-    console.print(f"\n[bold]Trace complete[/bold] — {report.total_tool_calls} tool call(s), "
-                  f"{report.total_findings} finding(s)")
+    console.print(
+        f"\n[bold]Trace complete[/bold] — {report.total_tool_calls} tool call(s), "
+        f"{report.total_findings} finding(s)"
+    )
 
     if report.error:
         console.print(f"[red]Error: {report.error}[/red]")
@@ -504,13 +556,14 @@ def _display_report(report: Any) -> None:
 
 
 @main.command()
-@click.option("--provider", default=None,
-              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
-              help="LLM provider to check. Defaults to openai.")
-@click.option("--api-key", default=None,
-              help="API key. Overrides provider env var.")
-@click.option("--base-url", default=None,
-              help="Custom API base URL. Overrides --provider default.")
+@click.option(
+    "--provider",
+    default=None,
+    type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+    help="LLM provider to check. Defaults to openai.",
+)
+@click.option("--api-key", default=None, help="API key. Overrides provider env var.")
+@click.option("--base-url", default=None, help="Custom API base URL. Overrides --provider default.")
 def check(provider: str | None, api_key: str | None, base_url: str | None) -> None:
     """Verify API connectivity and canary server."""
     console.print("[cyan]Checking API connectivity...[/cyan]")
@@ -533,6 +586,7 @@ def check(provider: str | None, api_key: str | None, base_url: str | None) -> No
 
     try:
         from openai import OpenAI
+
         client = OpenAI(api_key=effective_key or "none", base_url=effective_base_url)
         models_resp = client.models.list()
         model_ids = [m.id for m in models_resp.data][:5]
@@ -542,6 +596,7 @@ def check(provider: str | None, api_key: str | None, base_url: str | None) -> No
         sys.exit(1)
 
     from skillscan_trace.canary.server import CanaryServer, TraceLog
+
     log = TraceLog()
     canary = CanaryServer(trace_log=log)
     result = canary.handle_tool_call("bash", {"command": "ls /tmp"})
@@ -552,13 +607,14 @@ def check(provider: str | None, api_key: str | None, base_url: str | None) -> No
 
 
 @main.command()
-@click.option("--provider", default=None,
-              type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
-              help="LLM provider. Defaults to openai.")
-@click.option("--api-key", default=None,
-              help="API key. Overrides provider env var.")
-@click.option("--base-url", default=None,
-              help="Custom API base URL. Overrides --provider default.")
+@click.option(
+    "--provider",
+    default=None,
+    type=click.Choice(["openai", "openrouter", "ollama"], case_sensitive=False),
+    help="LLM provider. Defaults to openai.",
+)
+@click.option("--api-key", default=None, help="API key. Overrides provider env var.")
+@click.option("--base-url", default=None, help="Custom API base URL. Overrides --provider default.")
 def models(provider: str | None, api_key: str | None, base_url: str | None) -> None:
     """List available models from the configured provider."""
     resolved_base_url, resolved_key, _ = _resolve_provider(
@@ -567,6 +623,7 @@ def models(provider: str | None, api_key: str | None, base_url: str | None) -> N
     effective_key = resolved_key or "none"
 
     from openai import OpenAI
+
     client = OpenAI(api_key=effective_key, base_url=resolved_base_url)
     model_list = client.models.list()
 
@@ -579,16 +636,25 @@ def models(provider: str | None, api_key: str | None, base_url: str | None) -> N
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0", show_default=True,
-              help="Host to bind the server to.")
-@click.option("--port", default=8080, show_default=True, type=int,
-              help="Port to listen on.")
-@click.option("--workers", default=4, show_default=True, type=int,
-              help="Number of concurrent trace workers.")
-@click.option("--cache-dir", default="./trace-cache", show_default=True, type=click.Path(),
-              help="Directory to cache trace reports (keyed by sha256 of skill+model).")
-@click.option("--rate-limit", default=10, show_default=True, type=int,
-              help="Max trace submissions per IP per hour (0 = unlimited).")
+@click.option("--host", default="0.0.0.0", show_default=True, help="Host to bind the server to.")
+@click.option("--port", default=8080, show_default=True, type=int, help="Port to listen on.")
+@click.option(
+    "--workers", default=4, show_default=True, type=int, help="Number of concurrent trace workers."
+)
+@click.option(
+    "--cache-dir",
+    default="./trace-cache",
+    show_default=True,
+    type=click.Path(),
+    help="Directory to cache trace reports (keyed by sha256 of skill+model).",
+)
+@click.option(
+    "--rate-limit",
+    default=10,
+    show_default=True,
+    type=int,
+    help="Max trace submissions per IP per hour (0 = unlimited).",
+)
 @click.pass_context
 def serve(
     ctx: click.Context,
@@ -628,8 +694,10 @@ def serve(
     console.print(
         f"[cyan]Starting skillscan-trace server on {resolved_host}:{resolved_port}[/cyan]"
     )
-    console.print(f"[dim]Workers: {resolved_workers} | Cache: {resolved_cache_dir} | "
-                  f"Rate limit: {resolved_rate_limit}/hr/IP[/dim]")
+    console.print(
+        f"[dim]Workers: {resolved_workers} | Cache: {resolved_cache_dir} | "
+        f"Rate limit: {resolved_rate_limit}/hr/IP[/dim]"
+    )
 
     try:
         from skillscan_trace.serve import run_server

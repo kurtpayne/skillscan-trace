@@ -105,6 +105,7 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
     for key, value in raw.items():
         if key == "api_key":
             import warnings
+
             warnings.warn(
                 f"{path}: 'api_key' in config file is not supported and will be ignored. "
                 "Store your API key in a .env file (OPENAI_API_KEY=...) or export it as a "
@@ -127,6 +128,7 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
 
     if unknown:
         import warnings
+
         warnings.warn(
             f"{path}: unknown config keys ignored: {', '.join(unknown)}",
             stacklevel=2,

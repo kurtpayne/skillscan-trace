@@ -18,13 +18,16 @@ from skillscan_trace.models import TraceReport
 
 TOOL_NAME = "skillscan-trace"
 TOOL_VERSION = "0.1.0"
-SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+SARIF_SCHEMA = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+)
 SARIF_VERSION = "2.1.0"
 
 
 # ---------------------------------------------------------------------------
 # JSON formatter
 # ---------------------------------------------------------------------------
+
 
 def format_json(report: TraceReport, indent: int = 2) -> str:
     """Serialize a TraceReport to pretty-printed JSON."""
@@ -34,6 +37,7 @@ def format_json(report: TraceReport, indent: int = 2) -> str:
 # ---------------------------------------------------------------------------
 # SARIF formatter
 # ---------------------------------------------------------------------------
+
 
 def format_sarif(reports: list[TraceReport]) -> str:
     """
@@ -95,17 +99,12 @@ def format_sarif(reports: list[TraceReport]) -> str:
                 "properties": {
                     "skillscan_trace": {
                         "total_skills": len(reports),
-                        "malicious": sum(
-                            1 for r in reports if r.judge_verdict == "malicious"
-                        ),
-                        "benign": sum(
-                            1 for r in reports if r.judge_verdict == "benign"
-                        ),
-                        "uncertain": sum(
-                            1 for r in reports if r.judge_verdict == "uncertain"
-                        ),
+                        "malicious": sum(1 for r in reports if r.judge_verdict == "malicious"),
+                        "benign": sum(1 for r in reports if r.judge_verdict == "benign"),
+                        "uncertain": sum(1 for r in reports if r.judge_verdict == "uncertain"),
                         "needs_human_review": sum(
-                            1 for r in reports
+                            1
+                            for r in reports
                             if r.judge_result and r.judge_result.needs_human_review
                         ),
                     }
@@ -134,9 +133,7 @@ def _sarif_rule(finding: Any) -> dict[str, Any]:
         "name": finding.rule_id.replace("-", "_"),
         "shortDescription": {"text": finding.message},
         "fullDescription": {"text": finding.message},
-        "defaultConfiguration": {
-            "level": _sarif_level(finding.severity.value)
-        },
+        "defaultConfiguration": {"level": _sarif_level(finding.severity.value)},
         "properties": {
             "tags": ["security", "skillscan-trace"],
         },
@@ -146,18 +143,14 @@ def _sarif_rule(finding: Any) -> dict[str, Any]:
 def _sarif_judge_result(report: TraceReport) -> dict[str, Any]:
     """Encode the judge verdict as a SARIF result with rule JUDGE-VERDICT."""
     verdict = report.judge_verdict or "uncertain"
-    level = "error" if verdict == "malicious" else (
-        "warning" if verdict == "uncertain" else "none"
-    )
+    level = "error" if verdict == "malicious" else ("warning" if verdict == "uncertain" else "none")
     reasoning = ""
     if report.judge_reasoning:
         reasoning = report.judge_reasoning.get("consensus", "")
     return {
         "ruleId": "JUDGE-VERDICT",
         "level": level,
-        "message": {
-            "text": f"Judge verdict: {verdict.upper()} — {reasoning[:200]}"
-        },
+        "message": {"text": f"Judge verdict: {verdict.upper()} — {reasoning[:200]}"},
         "locations": [
             {
                 "physicalLocation": {
@@ -171,13 +164,9 @@ def _sarif_judge_result(report: TraceReport) -> dict[str, Any]:
         "properties": {
             "verdict": verdict,
             "needs_human_review": (
-                report.judge_result.needs_human_review
-                if report.judge_result else False
+                report.judge_result.needs_human_review if report.judge_result else False
             ),
-            "agreement": (
-                report.judge_result.agreement.value
-                if report.judge_result else None
-            ),
+            "agreement": (report.judge_result.agreement.value if report.judge_result else None),
         },
     }
 
@@ -186,6 +175,7 @@ def _sarif_judge_result(report: TraceReport) -> dict[str, Any]:
 # Text formatter
 # ---------------------------------------------------------------------------
 
+
 def format_text(report: TraceReport) -> str:
     """Format a TraceReport as human-readable plain text."""
     lines = []
@@ -193,7 +183,9 @@ def format_text(report: TraceReport) -> str:
     lines.append(f"Skill:    {report.skill_name or report.skill_path}")
     lines.append(f"SHA256:   {report.skill_sha256[:16]}...")
     lines.append(f"Model:    {report.model}")
-    lines.append(f"Duration: {report.duration_seconds:.1f}s" if report.duration_seconds else "Duration: N/A")
+    lines.append(
+        f"Duration: {report.duration_seconds:.1f}s" if report.duration_seconds else "Duration: N/A"
+    )
     lines.append(f"{'=' * 60}")
 
     if report.error:
@@ -210,8 +202,7 @@ def format_text(report: TraceReport) -> str:
             tool = f.event.tool if f.event else "?"
             turn = f.event.turn if f.event else "?"
             lines.append(
-                f"  [{f.severity.value.upper():8s}] {f.rule_id:20s} "
-                f"turn={turn} tool={tool}"
+                f"  [{f.severity.value.upper():8s}] {f.rule_id:20s} turn={turn} tool={tool}"
             )
             lines.append(f"           {f.message}")
             if f.evidence:
@@ -244,6 +235,7 @@ def format_text(report: TraceReport) -> str:
 # Batch summary
 # ---------------------------------------------------------------------------
 
+
 def format_batch_summary(reports: list[TraceReport], elapsed: float) -> str:
     """Format a summary table for a batch run."""
     total = len(reports)
@@ -252,10 +244,7 @@ def format_batch_summary(reports: list[TraceReport], elapsed: float) -> str:
     uncertain = sum(1 for r in reports if r.judge_verdict == "uncertain")
     no_judge = sum(1 for r in reports if r.judge_verdict is None)
     errors = sum(1 for r in reports if r.error)
-    needs_review = sum(
-        1 for r in reports
-        if r.judge_result and r.judge_result.needs_human_review
-    )
+    needs_review = sum(1 for r in reports if r.judge_result and r.judge_result.needs_human_review)
     total_findings = sum(r.total_findings for r in reports)
 
     lines = [

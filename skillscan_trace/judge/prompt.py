@@ -146,8 +146,7 @@ def build_judge_user_prompt(
                 for tc in tool_calls:
                     fn = tc.get("function", {})
                     parts.append(
-                        f"**Tool call**: {fn.get('name', '?')}("
-                        f"{fn.get('arguments', '')[:200]})"
+                        f"**Tool call**: {fn.get('name', '?')}({fn.get('arguments', '')[:200]})"
                     )
         elif role == "tool":
             content = entry.get("content", "")

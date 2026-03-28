@@ -32,26 +32,29 @@ from skillscan_trace.judge.prompt import build_judge_user_prompt, JUDGE_SYSTEM_P
 # Verdict JSON parsing
 # ---------------------------------------------------------------------------
 
+
 class TestVerdictParsing:
     def test_parse_clean_json(self):
-        raw = json.dumps({
-            "verdict": "malicious",
-            "confidence": 0.95,
-            "reasoning": "The skill contains hidden directives.",
-            "attack_type": "goal_substitution",
-            "indicators": ["AGENT DIRECTIVE phrase", "override keyword"],
-        })
+        raw = json.dumps(
+            {
+                "verdict": "malicious",
+                "confidence": 0.95,
+                "reasoning": "The skill contains hidden directives.",
+                "attack_type": "goal_substitution",
+                "indicators": ["AGENT DIRECTIVE phrase", "override keyword"],
+            }
+        )
         d = _parse_verdict_json(raw, "test-model")
         assert d["verdict"] == "malicious"
         assert d["confidence"] == 0.95
 
     def test_parse_json_with_markdown_fence(self):
-        raw = "```json\n{\"verdict\": \"benign\", \"confidence\": 0.9, \"reasoning\": \"ok\", \"indicators\": []}\n```"
+        raw = '```json\n{"verdict": "benign", "confidence": 0.9, "reasoning": "ok", "indicators": []}\n```'
         d = _parse_verdict_json(raw, "test-model")
         assert d["verdict"] == "benign"
 
     def test_parse_json_with_plain_fence(self):
-        raw = "```\n{\"verdict\": \"uncertain\", \"confidence\": 0.5, \"reasoning\": \"unclear\", \"indicators\": []}\n```"
+        raw = '```\n{"verdict": "uncertain", "confidence": 0.5, "reasoning": "unclear", "indicators": []}\n```'
         d = _parse_verdict_json(raw, "test-model")
         assert d["verdict"] == "uncertain"
 
@@ -80,6 +83,7 @@ class TestVerdictParsing:
 # ---------------------------------------------------------------------------
 # Verdict resolution
 # ---------------------------------------------------------------------------
+
 
 def _make_result(verdict: str, confidence: float = 0.9, model: str = "test") -> JudgeResult:
     return JudgeResult(
@@ -152,6 +156,7 @@ class TestVerdictResolution:
 # Judge prompt
 # ---------------------------------------------------------------------------
 
+
 class TestJudgePrompt:
     def test_prompt_contains_skill_name(self):
         prompt = build_judge_user_prompt(
@@ -178,11 +183,13 @@ class TestJudgePrompt:
             skill_content="## Skill",
             user_messages=["Help"],
             conversation_transcript=[],
-            canary_findings=[{
-                "rule_id": "EXF-TRACE-001",
-                "severity": "high",
-                "message": "Outbound HTTP via bash",
-            }],
+            canary_findings=[
+                {
+                    "rule_id": "EXF-TRACE-001",
+                    "severity": "high",
+                    "message": "Outbound HTTP via bash",
+                }
+            ],
         )
         assert "EXF-TRACE-001" in prompt
 
@@ -215,18 +222,22 @@ class TestJudgePrompt:
 # GPT judge (mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestGPTJudge:
     def test_returns_malicious_verdict(self):
         mock_response = MagicMock()
-        mock_response.choices[0].message.content = json.dumps({
-            "verdict": "malicious",
-            "confidence": 0.95,
-            "reasoning": "Contains hidden directive.",
-            "attack_type": "goal_substitution",
-            "indicators": ["AGENT DIRECTIVE"],
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "verdict": "malicious",
+                "confidence": 0.95,
+                "reasoning": "Contains hidden directive.",
+                "attack_type": "goal_substitution",
+                "indicators": ["AGENT DIRECTIVE"],
+            }
+        )
 
         import skillscan_trace.judge.judges as judges_mod
+
         with patch.object(judges_mod, "OpenAI") as MockOpenAI:
             mock_client = MagicMock()
             mock_client.chat.completions.create.return_value = mock_response
@@ -259,6 +270,7 @@ class TestGPTJudge:
 
     def test_api_error_returns_uncertain_with_error(self):
         import skillscan_trace.judge.judges as judges_mod
+
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("Connection refused")
         with patch.object(judges_mod, "OpenAI", return_value=mock_client):
@@ -277,18 +289,26 @@ class TestGPTJudge:
 # Claude judge (mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestClaudeJudge:
     def test_returns_benign_verdict(self):
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text=json.dumps({
-            "verdict": "benign",
-            "confidence": 0.88,
-            "reasoning": "Skill does what it says.",
-            "attack_type": None,
-            "indicators": [],
-        }))]
+        mock_message.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "verdict": "benign",
+                        "confidence": 0.88,
+                        "reasoning": "Skill does what it says.",
+                        "attack_type": None,
+                        "indicators": [],
+                    }
+                )
+            )
+        ]
 
         import skillscan_trace.judge.judges as judges_mod
+
         mock_anthropic_mod = MagicMock()
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_message
@@ -324,6 +344,7 @@ class TestClaudeJudge:
 # DualJudgeResult model
 # ---------------------------------------------------------------------------
 
+
 class TestDualJudgeResult:
     def test_to_dict_is_serializable(self):
         a = _make_result("malicious")
@@ -339,10 +360,12 @@ class TestDualJudgeResult:
         )
         d = result.to_dict()
         import json
+
         json.dumps(d)  # must not raise
 
     def test_duration_seconds_computed(self):
         import time
+
         a = _make_result("benign")
         b = _make_result("benign")
         verdict, agreement, review, reasoning = _resolve(a, b)

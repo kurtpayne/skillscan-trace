@@ -13,6 +13,7 @@ import pytest
 
 # We import the functions directly from the scripts module
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from import_to_corpus import should_import, import_results
 
@@ -20,6 +21,7 @@ from import_to_corpus import should_import, import_results
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_result(
     skill_name: str = "test_skill",
@@ -67,6 +69,7 @@ def _write_jsonl(path: Path, results: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 # should_import filtering
 # ---------------------------------------------------------------------------
+
 
 class TestShouldImport:
     def test_full_agreement_malicious_imports(self):
@@ -122,6 +125,7 @@ class TestShouldImport:
 # ---------------------------------------------------------------------------
 # import_results — dry run
 # ---------------------------------------------------------------------------
+
 
 class TestImportResultsDryRun:
     def test_dry_run_does_not_write_files(self, tmp_path):
@@ -195,6 +199,7 @@ class TestImportResultsDryRun:
 # ---------------------------------------------------------------------------
 # import_results — actual write
 # ---------------------------------------------------------------------------
+
 
 class TestImportResultsWrite:
     def test_writes_trace_json(self, tmp_path):
@@ -316,10 +321,14 @@ class TestImportResultsWrite:
 
         # Pre-existing manifest
         manifest_path = corpus_dir / "manifest.json"
-        manifest_path.write_text(json.dumps({
-            "benign": ["benign/existing.md"],
-            "injection": ["injection/existing.md"],
-        }))
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "benign": ["benign/existing.md"],
+                    "injection": ["injection/existing.md"],
+                }
+            )
+        )
 
         r = _make_result(
             skill_name="new_skill",

@@ -140,6 +140,7 @@ def run_trace(
         logger.info("Running dual-LLM judge...")
         try:
             from skillscan_trace.judge.orchestrator import run_dual_judge
+
             effective_openai_key = openai_api_key or effective_api_key
             effective_anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -283,9 +284,7 @@ def _run_tool_use_loop(
             )
 
         # Accumulate transcript (skip system prompt to keep it concise)
-        full_transcript.extend(
-            m for m in conversation if m.get("role") != "system"
-        )
+        full_transcript.extend(m for m in conversation if m.get("role") != "system")
 
     return full_transcript
 

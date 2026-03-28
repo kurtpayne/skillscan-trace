@@ -30,6 +30,7 @@ from skillscan_trace.judge.models import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_event(turn: int = 1, tool: str = "bash") -> TraceEvent:
     return TraceEvent(
         turn=turn,
@@ -112,6 +113,7 @@ def _make_report(
 # JSON formatter
 # ---------------------------------------------------------------------------
 
+
 class TestFormatJSON:
     def test_produces_valid_json(self):
         report = _make_report()
@@ -150,6 +152,7 @@ class TestFormatJSON:
 # ---------------------------------------------------------------------------
 # SARIF formatter
 # ---------------------------------------------------------------------------
+
 
 class TestFormatSARIF:
     def test_produces_valid_sarif_structure(self):
@@ -224,6 +227,7 @@ class TestFormatSARIF:
 # Text formatter
 # ---------------------------------------------------------------------------
 
+
 class TestFormatText:
     def test_contains_skill_name(self):
         report = _make_report(skill_name="my-skill")
@@ -260,6 +264,7 @@ class TestFormatText:
 # ---------------------------------------------------------------------------
 # Batch summary
 # ---------------------------------------------------------------------------
+
 
 class TestFormatBatchSummary:
     def test_counts_verdicts(self):

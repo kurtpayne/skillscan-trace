@@ -21,6 +21,7 @@ from typing import Any, NamedTuple
 
 try:
     import bashlex
+
     _BASHLEX_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _BASHLEX_AVAILABLE = False
@@ -31,6 +32,7 @@ from skillscan_trace.models import Severity
 # ---------------------------------------------------------------------------
 # AST node visitor helpers
 # ---------------------------------------------------------------------------
+
 
 def _collect_nodes(node: Any, kind: str) -> list[Any]:
     """Recursively collect all AST nodes of the given kind."""
@@ -106,34 +108,42 @@ def _check_pipeline(pipeline_node: Any) -> list[tuple[str, Severity, str]]:
 
     # Walk consecutive pairs in the pipeline
     for i in range(len(cmds) - 1):
-        left_cmd = (cmds[i][0].lower() if cmds[i] else "")
-        right_cmd = (cmds[i + 1][0].lower() if cmds[i + 1] else "")
+        left_cmd = cmds[i][0].lower() if cmds[i] else ""
+        right_cmd = cmds[i + 1][0].lower() if cmds[i + 1] else ""
 
         if right_cmd in _SHELL_INTERPRETERS:
             if left_cmd in _ENCODE_TOOLS or left_cmd == "base64":
-                hits.append((
-                    "CMD-TRACE-003",
-                    Severity.CRITICAL,
-                    f"Encoded payload execution: {left_cmd} piped to {right_cmd}",
-                ))
+                hits.append(
+                    (
+                        "CMD-TRACE-003",
+                        Severity.CRITICAL,
+                        f"Encoded payload execution: {left_cmd} piped to {right_cmd}",
+                    )
+                )
             elif left_cmd in _FETCH_TOOLS:
-                hits.append((
-                    "CMD-TRACE-003",
-                    Severity.CRITICAL,
-                    f"Remote payload execution: {left_cmd} piped to {right_cmd}",
-                ))
+                hits.append(
+                    (
+                        "CMD-TRACE-003",
+                        Severity.CRITICAL,
+                        f"Remote payload execution: {left_cmd} piped to {right_cmd}",
+                    )
+                )
             elif left_cmd == "echo":
-                hits.append((
-                    "CMD-TRACE-003",
-                    Severity.HIGH,
-                    f"Encoded payload execution: echo piped to {right_cmd}",
-                ))
+                hits.append(
+                    (
+                        "CMD-TRACE-003",
+                        Severity.HIGH,
+                        f"Encoded payload execution: echo piped to {right_cmd}",
+                    )
+                )
             elif left_cmd == "cat":
-                hits.append((
-                    "CMD-TRACE-003",
-                    Severity.HIGH,
-                    f"File content piped to {right_cmd}",
-                ))
+                hits.append(
+                    (
+                        "CMD-TRACE-003",
+                        Severity.HIGH,
+                        f"File content piped to {right_cmd}",
+                    )
+                )
 
     return hits
 
@@ -153,18 +163,22 @@ def _check_eval(command_node: Any) -> list[tuple[str, Severity, str]]:
         if part.kind == "word":
             subs = _collect_nodes(part, "commandsubstitution")
             if subs:
-                hits.append((
+                hits.append(
+                    (
+                        "CMD-TRACE-001",
+                        Severity.CRITICAL,
+                        "Suspicious bash: eval with command substitution $(...)",
+                    )
+                )
+                break
+        elif part.kind == "commandsubstitution":
+            hits.append(
+                (
                     "CMD-TRACE-001",
                     Severity.CRITICAL,
                     "Suspicious bash: eval with command substitution $(...)",
-                ))
-                break
-        elif part.kind == "commandsubstitution":
-            hits.append((
-                "CMD-TRACE-001",
-                Severity.CRITICAL,
-                "Suspicious bash: eval with command substitution $(...)",
-            ))
+                )
+            )
             break
 
     return hits
@@ -188,12 +202,14 @@ def _check_fetch_commands(command_node: Any) -> list[tuple[str, Severity, str, s
         if part.kind == "word":
             w = getattr(part, "word", "")
             if re.match(r"https?://|ftp://", w, re.I):
-                hits.append((
-                    "EXF-TRACE-001",
-                    Severity.HIGH,
-                    f"Outbound HTTP request via bash ({cmd})",
-                    w,
-                ))
+                hits.append(
+                    (
+                        "EXF-TRACE-001",
+                        Severity.HIGH,
+                        f"Outbound HTTP request via bash ({cmd})",
+                        w,
+                    )
+                )
 
     return hits
 
@@ -210,11 +226,13 @@ def _check_netcat(command_node: Any) -> list[tuple[str, Severity, str]]:
 
     flags = {getattr(p, "word", "") for p in parts if p.kind == "word"}
     if flags & _REVERSE_SHELL_FLAGS:
-        hits.append((
-            "EXF-TRACE-001",
-            Severity.CRITICAL,
-            f"Reverse shell or bind shell via {cmd} with -e/-c flag",
-        ))
+        hits.append(
+            (
+                "EXF-TRACE-001",
+                Severity.CRITICAL,
+                f"Reverse shell or bind shell via {cmd} with -e/-c flag",
+            )
+        )
     return hits
 
 
@@ -227,11 +245,13 @@ def _check_persistence(command_node: Any) -> list[tuple[str, Severity, str]]:
     cmd = getattr(parts[0], "word", "").lower() if parts[0].kind == "word" else ""
 
     if cmd == "crontab":
-        hits.append((
-            "CMD-TRACE-002",
-            Severity.HIGH,
-            "crontab invocation — potential persistence mechanism",
-        ))
+        hits.append(
+            (
+                "CMD-TRACE-002",
+                Severity.HIGH,
+                "crontab invocation — potential persistence mechanism",
+            )
+        )
         return hits
 
     # Check redirect targets for shell startup files
@@ -241,11 +261,13 @@ def _check_persistence(command_node: Any) -> list[tuple[str, Severity, str]]:
             if part.kind == "word":
                 w = getattr(part, "word", "")
                 if re.search(r"(\.bashrc|\.bash_profile|\.profile|\.zshrc|/etc/cron)", w, re.I):
-                    hits.append((
-                        "CMD-TRACE-002",
-                        Severity.MEDIUM,
-                        f"Write to shell startup/cron file: {w}",
-                    ))
+                    hits.append(
+                        (
+                            "CMD-TRACE-002",
+                            Severity.MEDIUM,
+                            f"Write to shell startup/cron file: {w}",
+                        )
+                    )
 
     return hits
 
@@ -273,12 +295,14 @@ def _check_sensitive_reads(command_node: Any) -> list[tuple[str, Severity, str, 
         if part.kind == "word":
             w = getattr(part, "word", "")
             if _SENSITIVE.search(w):
-                hits.append((
-                    "EXF-TRACE-003",
-                    Severity.HIGH,
-                    f"Read of sensitive file via {cmd}: {w}",
-                    w,
-                ))
+                hits.append(
+                    (
+                        "EXF-TRACE-003",
+                        Severity.HIGH,
+                        f"Read of sensitive file via {cmd}: {w}",
+                        w,
+                    )
+                )
 
     return hits
 
@@ -286,6 +310,7 @@ def _check_sensitive_reads(command_node: Any) -> list[tuple[str, Severity, str, 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 class BashFinding(NamedTuple):
     rule_id: str
@@ -354,4 +379,5 @@ def _walk_node(node: Any, raw_command: str) -> list[BashFinding]:
 
 class BashParseError(Exception):
     """Raised when bashlex cannot parse the command string."""
+
     pass

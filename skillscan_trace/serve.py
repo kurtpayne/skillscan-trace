@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # ── Job state ──────────────────────────────────────────────────────────────────
 
+
 class JobStatus:
     PENDING = "pending"
     RUNNING = "running"
@@ -77,6 +78,7 @@ def _put_job(job: Job) -> None:
 
 # ── Cache ──────────────────────────────────────────────────────────────────────
 
+
 def _cache_key(skill_content: str, model: str) -> str:
     return hashlib.sha256(f"{skill_content}::{model}".encode()).hexdigest()
 
@@ -102,6 +104,7 @@ def _write_cache(cache_dir: Path, key: str, result: dict[str, Any]) -> None:
 
 
 # ── Worker ─────────────────────────────────────────────────────────────────────
+
 
 def _run_job(job: Job, cache_dir: Path) -> None:
     """Execute a trace job in a background thread."""
@@ -131,6 +134,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
 
         # Resolve provider
         from skillscan_trace.cli import PROVIDER_CONFIGS
+
         cfg = PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["openai"])
         resolved_base_url: str = base_url or str(cfg["base_url"])
         if not api_key and cfg.get("env_key"):
@@ -170,6 +174,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
 
 
 # ── FastAPI app factory ────────────────────────────────────────────────────────
+
 
 def create_app(
     cache_dir: Path = Path("./trace-cache"),
@@ -256,12 +261,13 @@ def create_app(
         if req.source_url:
             try:
                 import requests as req_lib
+
                 resp = req_lib.get(req.source_url, timeout=10)
                 if resp.status_code != 200:
                     raise HTTPException(
                         status_code=422,
                         detail=f"source_url returned HTTP {resp.status_code}. "
-                               "Only public GitHub URLs are supported for free scans.",
+                        "Only public GitHub URLs are supported for free scans.",
                     )
                 remote_content = resp.text.strip()
                 local_content = req.skill_content.strip()
@@ -269,7 +275,7 @@ def create_app(
                     raise HTTPException(
                         status_code=422,
                         detail="skill_content does not match the content at source_url. "
-                               "Submit the exact content of the public skill file.",
+                        "Submit the exact content of the public skill file.",
                     )
             except HTTPException:
                 raise
@@ -306,6 +312,7 @@ def create_app(
 
 
 # ── CLI entry point ────────────────────────────────────────────────────────────
+
 
 def run_server(
     host: str = "0.0.0.0",

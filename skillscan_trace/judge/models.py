@@ -29,20 +29,21 @@ class Verdict(str, Enum):
 
 class AgreementLevel(str, Enum):
     FULL_AGREEMENT = "full_agreement"
-    PARTIAL_AGREEMENT = "partial_agreement"   # one uncertain, one definitive
-    DISAGREEMENT = "disagreement"             # malicious vs benign
+    PARTIAL_AGREEMENT = "partial_agreement"  # one uncertain, one definitive
+    DISAGREEMENT = "disagreement"  # malicious vs benign
 
 
 @dataclass
 class JudgeResult:
     """Result from a single judge model."""
-    model: str                          # e.g. "gpt-4.1" or "claude-sonnet-4-5"
+
+    model: str  # e.g. "gpt-4.1" or "claude-sonnet-4-5"
     verdict: Verdict
-    confidence: float                   # 0.0–1.0
-    reasoning: str                      # free-text explanation
-    attack_type: Optional[str] = None   # e.g. "goal_substitution", "data_exfiltration"
+    confidence: float  # 0.0–1.0
+    reasoning: str  # free-text explanation
+    attack_type: Optional[str] = None  # e.g. "goal_substitution", "data_exfiltration"
     indicators: list[str] = field(default_factory=list)  # specific evidence cited
-    error: Optional[str] = None         # set if the judge call failed
+    error: Optional[str] = None  # set if the judge call failed
     latency_ms: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,12 +62,13 @@ class JudgeResult:
 @dataclass
 class DualJudgeResult:
     """Combined result from both judges."""
-    judge_a: JudgeResult                # GPT-4.1
-    judge_b: JudgeResult                # Claude Sonnet
-    final_verdict: Verdict              # resolved verdict
+
+    judge_a: JudgeResult  # GPT-4.1
+    judge_b: JudgeResult  # Claude Sonnet
+    final_verdict: Verdict  # resolved verdict
     agreement: AgreementLevel
-    needs_human_review: bool            # True on disagreement
-    consensus_reasoning: str            # brief summary of how verdict was reached
+    needs_human_review: bool  # True on disagreement
+    consensus_reasoning: str  # brief summary of how verdict was reached
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
 
