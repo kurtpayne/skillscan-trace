@@ -20,7 +20,7 @@ import re
 from typing import Any, NamedTuple
 
 try:
-    import bashlex
+    import bashlex  # type: ignore[import-untyped]
 
     _BASHLEX_AVAILABLE = True
 except ImportError:  # pragma: no cover
