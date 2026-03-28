@@ -1,5 +1,10 @@
 # skillscan-trace
 
+[![CI](https://github.com/kurtpayne/skillscan-trace/actions/workflows/ci.yml/badge.svg)](https://github.com/kurtpayne/skillscan-trace/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/skillscan-trace.svg)](https://pypi.org/project/skillscan-trace/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 **Behavioral execution engine for MCP-based AI agent skills.**
 
 skillscan-trace runs a skill against a real language model inside an instrumented, isolated environment and records everything the model does: every file it reads, every network request it makes, every environment variable it accesses, every binary it probes. The output is a structured, machine-readable trace report.
