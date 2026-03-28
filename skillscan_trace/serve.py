@@ -185,7 +185,7 @@ def create_app(
     try:
         from fastapi import FastAPI, HTTPException, Request
         from fastapi.responses import JSONResponse
-        from pydantic import BaseModel, Field
+        from pydantic import BaseModel, Field, field_validator
     except ImportError as e:
         raise ImportError(
             "serve mode requires fastapi and pydantic. "
@@ -220,15 +220,41 @@ def create_app(
             _rate_buckets[ip] = bucket
             return True
 
+    _ALLOWED_SOURCE_HOSTS: frozenset[str] = frozenset(
+        {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
+    )
+
     class SubmitRequest(BaseModel):
         skill_content: str = Field(..., description="Raw SKILL.md content to trace")
         source_url: str | None = Field(
             None,
             description=(
                 "Public GitHub raw URL of the skill. If provided, the server "
-                "fetches and verifies the content matches (OSS verification)."
+                "fetches and verifies the content matches (OSS verification). "
+                "Must be an https:// URL on github.com or raw.githubusercontent.com."
             ),
         )
+
+        @field_validator("source_url")
+        @classmethod
+        def _validate_source_url(cls, v: str | None) -> str | None:
+            if v is None:
+                return v
+            from urllib.parse import urlparse
+
+            parsed = urlparse(v)
+            if parsed.scheme != "https":
+                raise ValueError("source_url must use the https:// scheme")
+            host = (parsed.hostname or "").lower()
+            _allowed = {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
+            if host not in _allowed:
+                raise ValueError(
+                    f"source_url host '{host}' is not allowed. "
+                    "Only raw.githubusercontent.com, github.com, and "
+                    "gist.githubusercontent.com are accepted."
+                )
+            return v
+
         api_key: str | None = Field(
             None,
             description=(
@@ -257,12 +283,14 @@ def create_app(
                 detail=f"Rate limit exceeded: max {rate_limit_per_hour} scans per hour per IP.",
             )
 
-        # OSS verification: if source_url provided, fetch and verify content matches
+        # OSS verification: if source_url provided, fetch and verify content matches.
+        # source_url is validated by SubmitRequest._validate_source_url to be an
+        # https:// URL on an allowed GitHub host, preventing SSRF.
         if req.source_url:
             try:
                 import requests as req_lib
 
-                resp = req_lib.get(req.source_url, timeout=10)
+                resp = req_lib.get(req.source_url, timeout=10, allow_redirects=False)
                 if resp.status_code != 200:
                     raise HTTPException(
                         status_code=422,
