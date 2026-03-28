@@ -49,7 +49,7 @@ class TraceEvent:
     # Populated by the analyzer after the fact
     findings: list["Finding"] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "turn": self.turn,
             "tool": self.tool,
@@ -73,7 +73,7 @@ class Finding:
     event: Optional[TraceEvent] = None
     evidence: Optional[str] = None     # the specific text/value that triggered the finding
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rule_id": self.rule_id,
             "severity": self.severity.value,
@@ -99,12 +99,12 @@ class TraceReport:
     events: list[TraceEvent] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     # Full conversation transcript (all turns, all messages) for the judge
-    conversation_transcript: list[dict] = field(default_factory=list)
+    conversation_transcript: list[dict[str, Any]] = field(default_factory=list)
     # Judge results — populated if --judge flag was used
     judge_result: Optional[Any] = None           # DualJudgeResult | None
     # Legacy simple fields kept for backwards compat
     judge_verdict: Optional[str] = None
-    judge_reasoning: Optional[dict] = None
+    judge_reasoning: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
@@ -123,8 +123,8 @@ class TraceReport:
     def total_findings(self) -> int:
         return len(self.findings)
 
-    def to_dict(self) -> dict:
-        d = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "skill_path": self.skill_path,
             "skill_name": self.skill_name,
             "skill_sha256": self.skill_sha256,

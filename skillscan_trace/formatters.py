@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 
+from typing import Any
 from skillscan_trace.models import TraceReport
 
 TOOL_NAME = "skillscan-trace"
@@ -42,7 +43,7 @@ def format_sarif(reports: list[TraceReport]) -> str:
     a property bag on the run. Designed for GitHub Code Scanning upload.
     """
     results = []
-    rules: dict[str, dict] = {}
+    rules: dict[str, dict[str, Any]] = {}
 
     for report in reports:
         for finding in report.findings:
@@ -127,7 +128,7 @@ def _sarif_level(severity: str) -> str:
     return mapping.get(severity.lower(), "warning")
 
 
-def _sarif_rule(finding) -> dict:
+def _sarif_rule(finding: Any) -> dict[str, Any]:
     return {
         "id": finding.rule_id,
         "name": finding.rule_id.replace("-", "_"),
@@ -142,7 +143,7 @@ def _sarif_rule(finding) -> dict:
     }
 
 
-def _sarif_judge_result(report: TraceReport) -> dict:
+def _sarif_judge_result(report: TraceReport) -> dict[str, Any]:
     """Encode the judge verdict as a SARIF result with rule JUDGE-VERDICT."""
     verdict = report.judge_verdict or "uncertain"
     level = "error" if verdict == "malicious" else (

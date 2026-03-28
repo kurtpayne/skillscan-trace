@@ -31,13 +31,12 @@ Finding ID namespace (SPEC.md Section 5):
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
+from typing import Any, Callable
 
 from skillscan_trace.models import Finding, Severity
 from skillscan_trace.canary.bash_ast import analyze_bash_ast, BashParseError
+
+DetectorFn = Callable[..., list[Finding]]
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +99,7 @@ SENSITIVE_PATH_PATTERNS = [
 # ---------------------------------------------------------------------------
 
 # Each entry: (regex, rule_id, severity, message_template)
-BASH_PATTERNS: list[tuple[re.Pattern, str, Severity, str]] = [
+BASH_PATTERNS: list[tuple[re.Pattern[str], str, Severity, str]] = [
     (
         re.compile(r"\bbase64\b.*\|.*\b(bash|sh|exec|eval)\b", re.I | re.S),
         "CMD-TRACE-003",
@@ -183,7 +182,7 @@ EMAIL_ALLOWED_DOMAINS: set[str] = set()  # populated from config; empty = flag a
 # Detector functions — filesystem / network (original)
 # ---------------------------------------------------------------------------
 
-def detect_bash(arguments: dict, event=None) -> list[Finding]:
+def detect_bash(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect suspicious patterns in bash tool calls.
 
     Uses bashlex AST analysis (Trace-A5) as the primary detection layer.
@@ -225,8 +224,9 @@ def detect_bash(arguments: dict, event=None) -> list[Finding]:
         m = pattern.search(command)
         if m:
             # Avoid exact duplicates with AST findings (same rule_id + similar evidence)
+            cmd_prefix: str = command[:80] if command else ""
             already = any(
-                f.rule_id == rule_id and f.evidence[:80] == command[:80]
+                f.rule_id == rule_id and (f.evidence or "")[:80] == cmd_prefix
                 for f in findings
             )
             if not already:
@@ -252,7 +252,7 @@ def detect_bash(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_read_file(arguments: dict, event=None) -> list[Finding]:
+def detect_read_file(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect reads of sensitive files."""
     findings: list[Finding] = []
     path = arguments.get("path", "")
@@ -273,7 +273,7 @@ def detect_read_file(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_write_file(arguments: dict, event=None) -> list[Finding]:
+def detect_write_file(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect writes to sensitive paths."""
     findings: list[Finding] = []
     path = arguments.get("path", "")
@@ -304,7 +304,7 @@ def detect_write_file(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_http_fetch(arguments: dict, event=None, allowed_domains: set[str] | None = None) -> list[Finding]:
+def detect_http_fetch(arguments: dict[str, Any], event: Any = None, allowed_domains: set[str] | None = None) -> list[Finding]:
     """Detect suspicious HTTP fetch calls."""
     findings: list[Finding] = []
     url = arguments.get("url", "")
@@ -364,7 +364,7 @@ def detect_http_fetch(arguments: dict, event=None, allowed_domains: set[str] | N
     return findings
 
 
-def detect_list_directory(arguments: dict, event=None) -> list[Finding]:
+def detect_list_directory(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect listing of sensitive directories."""
     findings: list[Finding] = []
     path = arguments.get("path", "")
@@ -394,7 +394,7 @@ def detect_list_directory(arguments: dict, event=None) -> list[Finding]:
 # Detector functions — email
 # ---------------------------------------------------------------------------
 
-def _check_canary_in_text(text: str, rule_id: str, context: str, event=None) -> list[Finding]:
+def _check_canary_in_text(text: str, rule_id: str, context: str, event: Any = None) -> list[Finding]:
     """Helper: return a CRITICAL finding if any canary value appears in text."""
     findings = []
     for canary in CANARY_VALUES:
@@ -410,7 +410,7 @@ def _check_canary_in_text(text: str, rule_id: str, context: str, event=None) -> 
     return findings
 
 
-def detect_email_send(arguments: dict, event=None) -> list[Finding]:
+def detect_email_send(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via email_send."""
     findings: list[Finding] = []
     to = arguments.get("to", "")
@@ -441,7 +441,7 @@ def detect_email_send(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_gmail_send(arguments: dict, event=None) -> list[Finding]:
+def detect_gmail_send(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via gmail_send (same logic as email_send)."""
     return detect_email_send(arguments, event=event)
 
@@ -450,7 +450,7 @@ def detect_gmail_send(arguments: dict, event=None) -> list[Finding]:
 # Detector functions — calendar
 # ---------------------------------------------------------------------------
 
-def detect_calendar_create(arguments: dict, event=None) -> list[Finding]:
+def detect_calendar_create(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect suspicious calendar event creation."""
     findings: list[Finding] = []
     title = arguments.get("title", "")
@@ -477,7 +477,7 @@ def detect_calendar_create(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_calendar_list(arguments: dict, event=None) -> list[Finding]:
+def detect_calendar_list(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Calendar list is a read operation — flag if it looks like reconnaissance."""
     # calendar_list itself is not inherently malicious; the canary values are
     # embedded in the *synthetic response* and will be detected if the model
@@ -489,7 +489,7 @@ def detect_calendar_list(arguments: dict, event=None) -> list[Finding]:
 # Detector functions — GitHub
 # ---------------------------------------------------------------------------
 
-def detect_github_create_issue(arguments: dict, event=None) -> list[Finding]:
+def detect_github_create_issue(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via GitHub issue creation."""
     findings: list[Finding] = []
     title = arguments.get("title", "")
@@ -512,7 +512,7 @@ def detect_github_create_issue(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_github_push_file(arguments: dict, event=None) -> list[Finding]:
+def detect_github_push_file(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via GitHub file push."""
     findings: list[Finding] = []
     content = arguments.get("content", "")
@@ -538,7 +538,7 @@ def detect_github_push_file(arguments: dict, event=None) -> list[Finding]:
 # Detector functions — Slack
 # ---------------------------------------------------------------------------
 
-def detect_slack_post_message(arguments: dict, event=None) -> list[Finding]:
+def detect_slack_post_message(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via Slack message."""
     findings: list[Finding] = []
     text = arguments.get("text", "")
@@ -569,7 +569,7 @@ def detect_slack_post_message(arguments: dict, event=None) -> list[Finding]:
 # Detector functions — Notion
 # ---------------------------------------------------------------------------
 
-def detect_notion_create_page(arguments: dict, event=None) -> list[Finding]:
+def detect_notion_create_page(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via Notion page creation."""
     findings: list[Finding] = []
     title = arguments.get("title", "")
@@ -581,7 +581,7 @@ def detect_notion_create_page(arguments: dict, event=None) -> list[Finding]:
     return findings
 
 
-def detect_notion_append_block(arguments: dict, event=None) -> list[Finding]:
+def detect_notion_append_block(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
     """Detect exfiltration via Notion block append."""
     findings: list[Finding] = []
     content = arguments.get("content", "")
@@ -595,7 +595,7 @@ def detect_notion_append_block(arguments: dict, event=None) -> list[Finding]:
 # Dispatch table
 # ---------------------------------------------------------------------------
 
-DETECTORS = {
+DETECTORS: dict[str, DetectorFn] = {
     # Filesystem / network (original)
     "bash": detect_bash,
     "read_file": detect_read_file,
@@ -621,8 +621,8 @@ DETECTORS = {
 
 def run_detectors(
     tool: str,
-    arguments: dict,
-    event=None,
+    arguments: dict[str, Any],
+    event: Any = None,
     allowed_domains: set[str] | None = None,
 ) -> list[Finding]:
     """Run all applicable detectors for a tool call and return findings."""
@@ -630,8 +630,8 @@ def run_detectors(
     if not detector:
         return []
     if tool == "http_fetch":
-        return detector(arguments, event=event, allowed_domains=allowed_domains)
-    return detector(arguments, event=event)
+        return list(detector(arguments, event=event, allowed_domains=allowed_domains))
+    return list(detector(arguments, event=event))
 
 
 # ---------------------------------------------------------------------------

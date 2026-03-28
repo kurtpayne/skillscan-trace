@@ -21,6 +21,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -44,7 +45,7 @@ def _load_dotenv() -> None:
     Keys are never written to the config file — use .env or export them.
     """
     try:
-        from dotenv import load_dotenv, find_dotenv  # type: ignore[import]
+        from dotenv import load_dotenv, find_dotenv  # type: ignore[import-untyped,unused-ignore]
     except ImportError:
         return  # python-dotenv not installed — silently skip
 
@@ -87,7 +88,9 @@ def main(ctx: click.Context, debug: bool, config_path: str | None) -> None:
             console.print(f"[dim]Using config: {found}[/dim]", highlight=False)
 
 
-PROVIDER_CONFIGS = {
+ProviderConfig = dict[str, Any]
+
+PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "env_key": "OPENAI_API_KEY",
@@ -126,27 +129,29 @@ def _resolve_provider(
             param_hint="--provider",
         )
 
-    cfg = PROVIDER_CONFIGS.get(provider or "openai")
+    cfg: ProviderConfig = PROVIDER_CONFIGS[provider or "openai"]
 
     # base_url: explicit flag > provider default
-    resolved_base_url = base_url or cfg["base_url"]
+    resolved_base_url: str = base_url or str(cfg["base_url"])
 
     # model: if user passed the bare default (gpt-4.1-mini) and provider has its own
     # default, use the provider default instead so openrouter gets openai/gpt-4.1-mini
     resolved_model = model
     if model == "gpt-4.1-mini" and provider and provider != "openai":
-        resolved_model = cfg["default_model"]
+        resolved_model = str(cfg["default_model"])
 
     # api_key: explicit flag > env var for this provider > OPENAI_API_KEY fallback
+    resolved_key: str | None
     if api_key:
         resolved_key = api_key
     elif cfg["env_key"]:
-        resolved_key = os.environ.get(cfg["env_key"]) or os.environ.get("OPENAI_API_KEY")
+        env_key_name: str = str(cfg["env_key"])
+        resolved_key = os.environ.get(env_key_name) or os.environ.get("OPENAI_API_KEY")
     else:
         resolved_key = os.environ.get("OPENAI_API_KEY")  # ollama: key not required
 
     if cfg["requires_key"] and not resolved_key:
-        env_hint = cfg["env_key"] or "OPENAI_API_KEY"
+        env_hint: str = str(cfg["env_key"]) if cfg["env_key"] else "OPENAI_API_KEY"
         raise click.UsageError(
             f"No API key found for provider '{provider or 'openai'}'. "
             f"Set {env_hint} or pass --api-key."
@@ -362,7 +367,7 @@ def _run_single(
     judge: bool = False,
     anthropic_api_key: str | None = None,
     quiet: bool = False,
-):
+) -> Any:
     """Run a single trace and write output. Returns the TraceReport or None."""
     from skillscan_trace.resolver import resolve, SkillResolverError
     from skillscan_trace.input_gen import generate_user_messages
@@ -433,7 +438,7 @@ def _run_single(
     return report
 
 
-def _display_report(report) -> None:
+def _display_report(report: Any) -> None:
     """Display a trace report summary to the console."""
     console.print(f"\n[bold]Trace complete[/bold] — {report.total_tool_calls} tool call(s), "
                   f"{report.total_findings} finding(s)")
@@ -511,23 +516,23 @@ def check(provider: str | None, api_key: str | None, base_url: str | None) -> No
     console.print("[cyan]Checking API connectivity...[/cyan]")
 
     provider_label = provider or "openai"
-    cfg = PROVIDER_CONFIGS[provider_label]
+    cfg: ProviderConfig = PROVIDER_CONFIGS[provider_label]
 
     # Resolve key
     effective_key = api_key
     if not effective_key and cfg["env_key"]:
-        effective_key = os.environ.get(cfg["env_key"]) or os.environ.get("OPENAI_API_KEY")
+        effective_key = os.environ.get(str(cfg["env_key"])) or os.environ.get("OPENAI_API_KEY")
     if not effective_key and provider_label == "ollama":
         effective_key = "ollama"  # Ollama accepts any non-empty string
     if cfg["requires_key"] and not effective_key:
         console.print(f"[red]No API key found. Set {cfg['env_key']} or pass --api-key.[/red]")
         sys.exit(1)
 
-    effective_base_url = base_url or cfg["base_url"]
+    effective_base_url: str = base_url or str(cfg["base_url"])
     console.print(f"[dim]Provider: {provider_label} | Base URL: {effective_base_url}[/dim]")
 
     try:
-        from openai import OpenAI  # type: ignore
+        from openai import OpenAI
         client = OpenAI(api_key=effective_key or "none", base_url=effective_base_url)
         models_resp = client.models.list()
         model_ids = [m.id for m in models_resp.data][:5]
@@ -561,7 +566,7 @@ def models(provider: str | None, api_key: str | None, base_url: str | None) -> N
     )
     effective_key = resolved_key or "none"
 
-    from openai import OpenAI  # type: ignore
+    from openai import OpenAI
     client = OpenAI(api_key=effective_key, base_url=resolved_base_url)
     model_list = client.models.list()
 

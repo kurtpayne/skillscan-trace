@@ -17,6 +17,7 @@ import concurrent.futures
 import logging
 import os
 import time
+from typing import Any
 
 from skillscan_trace.judge.models import (
     AgreementLevel,
@@ -32,8 +33,8 @@ logger = logging.getLogger("skillscan_trace.judge.orchestrator")
 def run_dual_judge(
     skill_content: str,
     user_messages: list[str],
-    conversation_transcript: list[dict],
-    canary_findings: list[dict],
+    conversation_transcript: list[dict[str, Any]],
+    canary_findings: list[dict[str, Any]],
     skill_name: str = "",
     skill_description: str = "",
     openai_api_key: str | None = None,
@@ -51,28 +52,29 @@ def run_dual_judge(
     effective_openai_key = openai_api_key or os.environ.get("OPENAI_API_KEY", "")
     effective_anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
-    judge_kwargs = dict(
-        skill_content=skill_content,
-        user_messages=user_messages,
-        conversation_transcript=conversation_transcript,
-        canary_findings=canary_findings,
-        skill_name=skill_name,
-        skill_description=skill_description,
-    )
-
     # Run both judges in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         future_a = executor.submit(
             run_gpt_judge,
-            **judge_kwargs,
-            api_key=effective_openai_key,
-            model=gpt_model,
+            skill_content,
+            user_messages,
+            conversation_transcript,
+            canary_findings,
+            skill_name,
+            skill_description,
+            effective_openai_key,
+            gpt_model,
         )
         future_b = executor.submit(
             run_claude_judge,
-            **judge_kwargs,
-            api_key=effective_anthropic_key,
-            model=claude_model,
+            skill_content,
+            user_messages,
+            conversation_transcript,
+            canary_findings,
+            skill_name,
+            skill_description,
+            effective_anthropic_key,
+            claude_model,
         )
 
         judge_a: JudgeResult = future_a.result()

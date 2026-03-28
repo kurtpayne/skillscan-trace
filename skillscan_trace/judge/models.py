@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class Verdict(str, Enum):
@@ -45,7 +45,7 @@ class JudgeResult:
     error: Optional[str] = None         # set if the judge call failed
     latency_ms: float = 0.0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "verdict": self.verdict.value,
@@ -76,7 +76,7 @@ class DualJudgeResult:
             return self.finished_at - self.started_at
         return None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "judge_a": self.judge_a.to_dict(),
             "judge_b": self.judge_b.to_dict(),

@@ -66,7 +66,7 @@ def _generate_via_llm(
     base_url: str | None,
 ) -> list[str]:
     """Call the LLM to generate user messages."""
-    from openai import OpenAI  # type: ignore
+    from openai import OpenAI
 
     effective_base_url = base_url or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=effective_base_url)

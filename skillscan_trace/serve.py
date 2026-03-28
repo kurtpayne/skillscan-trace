@@ -85,7 +85,8 @@ def _read_cache(cache_dir: Path, key: str) -> dict[str, Any] | None:
     path = cache_dir / f"{key}.json"
     if path.exists():
         try:
-            return json.loads(path.read_text())
+            data: dict[str, Any] = json.loads(path.read_text())
+            return data
         except (json.JSONDecodeError, OSError):
             return None
     return None
@@ -109,16 +110,15 @@ def _run_job(job: Job, cache_dir: Path) -> None:
 
     try:
         import tempfile
-        from skillscan_trace.harness import TraceHarness
+        from skillscan_trace.harness import run_trace
         from skillscan_trace.formatters import format_json
 
-        skill_content = params["skill_content"]
-        model = params.get("model", "gpt-4.1-mini")
-        provider = params.get("provider", "openai")
-        api_key = params.get("api_key")
-        base_url = params.get("base_url")
-        variants = params.get("variants", 3)
-        max_turns = params.get("max_turns", 10)
+        skill_content: str = str(params["skill_content"])
+        model: str = str(params.get("model", "gpt-4.1-mini"))
+        provider: str = str(params.get("provider", "openai"))
+        api_key: str | None = params.get("api_key")
+        base_url: str | None = params.get("base_url")
+        max_turns: int = int(params.get("max_turns", 10))
 
         # Check cache first
         cache_key = _cache_key(skill_content, model)
@@ -132,9 +132,9 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         # Resolve provider
         from skillscan_trace.cli import PROVIDER_CONFIGS
         cfg = PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["openai"])
-        resolved_base_url = base_url or cfg["base_url"]
+        resolved_base_url: str = base_url or str(cfg["base_url"])
         if not api_key and cfg.get("env_key"):
-            api_key = os.environ.get(cfg["env_key"]) or os.environ.get("OPENAI_API_KEY")
+            api_key = os.environ.get(str(cfg["env_key"])) or os.environ.get("OPENAI_API_KEY")
 
         # Write skill to a temp file
         with tempfile.NamedTemporaryFile(
@@ -144,16 +144,13 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             skill_path = f.name
 
         try:
-            harness = TraceHarness(
+            report = run_trace(
+                skill_path,
                 model=model,
-                input_model=params.get("input_model", model),
                 api_key=api_key,
                 base_url=resolved_base_url,
-                variants=variants,
                 max_turns=max_turns,
-                allowed_domains=set(params.get("allow_domains", [])),
             )
-            report = harness.run(skill_path)
             result_dict = json.loads(format_json(report))
         finally:
             Path(skill_path).unlink(missing_ok=True)

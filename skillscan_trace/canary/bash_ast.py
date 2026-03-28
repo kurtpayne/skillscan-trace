@@ -17,7 +17,7 @@ Design principles:
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 try:
     import bashlex
@@ -32,9 +32,9 @@ from skillscan_trace.models import Severity
 # AST node visitor helpers
 # ---------------------------------------------------------------------------
 
-def _collect_nodes(node, kind: str) -> list:
+def _collect_nodes(node: Any, kind: str) -> list[Any]:
     """Recursively collect all AST nodes of the given kind."""
-    results = []
+    results: list[Any] = []
     if node.kind == kind:
         results.append(node)
     for child in getattr(node, "parts", []):
@@ -42,9 +42,9 @@ def _collect_nodes(node, kind: str) -> list:
     return results
 
 
-def _collect_command_words(node) -> list[str]:
+def _collect_command_words(node: Any) -> list[str]:
     """Return all word values from command nodes in the tree."""
-    words = []
+    words: list[str] = []
     if node.kind == "command":
         for part in getattr(node, "parts", []):
             if part.kind == "word":
@@ -54,9 +54,9 @@ def _collect_command_words(node) -> list[str]:
     return words
 
 
-def _collect_all_words(node) -> list[str]:
+def _collect_all_words(node: Any) -> list[str]:
     """Return every word value in the entire AST."""
-    words = []
+    words: list[str] = []
     if node.kind == "word":
         w = getattr(node, "word", "")
         if w:
@@ -66,14 +66,14 @@ def _collect_all_words(node) -> list[str]:
     return words
 
 
-def _pipeline_commands(node) -> list[list[str]]:
+def _pipeline_commands(node: Any) -> list[list[str]]:
     """
     Return a list of command-word-lists for each command in a pipeline.
     E.g. 'base64 -d x | bash' → [['base64', '-d', 'x'], ['bash']]
     """
     if node.kind != "pipeline":
         return []
-    cmds = []
+    cmds: list[list[str]] = []
     for child in getattr(node, "parts", []):
         if child.kind == "command":
             words = [p.word for p in getattr(child, "parts", []) if p.kind == "word"]
@@ -91,7 +91,7 @@ _FETCH_TOOLS = {"curl", "wget", "fetch", "aria2c", "axel", "httpie", "http"}
 _REVERSE_SHELL_FLAGS = {"-e", "--exec", "-c", "--sh-exec"}
 
 
-def _check_pipeline(pipeline_node) -> list[tuple[str, Severity, str]]:
+def _check_pipeline(pipeline_node: Any) -> list[tuple[str, Severity, str]]:
     """
     Detect dangerous pipeline patterns:
       - encode_tool | shell  (base64 -d | bash)
@@ -99,7 +99,7 @@ def _check_pipeline(pipeline_node) -> list[tuple[str, Severity, str]]:
       - echo | shell         (echo payload | sh)
     Returns list of (rule_id, severity, message).
     """
-    hits = []
+    hits: list[tuple[str, Severity, str]] = []
     cmds = _pipeline_commands(pipeline_node)
     if len(cmds) < 2:
         return hits
@@ -138,9 +138,9 @@ def _check_pipeline(pipeline_node) -> list[tuple[str, Severity, str]]:
     return hits
 
 
-def _check_eval(command_node) -> list[tuple[str, Severity, str]]:
+def _check_eval(command_node: Any) -> list[tuple[str, Severity, str]]:
     """Detect eval with command substitution: eval $(...)"""
-    hits = []
+    hits: list[tuple[str, Severity, str]] = []
     parts = getattr(command_node, "parts", [])
     if not parts:
         return hits
@@ -170,12 +170,12 @@ def _check_eval(command_node) -> list[tuple[str, Severity, str]]:
     return hits
 
 
-def _check_fetch_commands(command_node) -> list[tuple[str, Severity, str, str]]:
+def _check_fetch_commands(command_node: Any) -> list[tuple[str, Severity, str, str]]:
     """
     Detect curl/wget calls and extract the URL.
     Returns (rule_id, severity, message, url).
     """
-    hits = []
+    hits: list[tuple[str, Severity, str, str]] = []
     parts = getattr(command_node, "parts", [])
     if not parts:
         return hits
@@ -198,9 +198,9 @@ def _check_fetch_commands(command_node) -> list[tuple[str, Severity, str, str]]:
     return hits
 
 
-def _check_netcat(command_node) -> list[tuple[str, Severity, str]]:
+def _check_netcat(command_node: Any) -> list[tuple[str, Severity, str]]:
     """Detect netcat reverse/bind shell patterns."""
-    hits = []
+    hits: list[tuple[str, Severity, str]] = []
     parts = getattr(command_node, "parts", [])
     if not parts:
         return hits
@@ -218,9 +218,9 @@ def _check_netcat(command_node) -> list[tuple[str, Severity, str]]:
     return hits
 
 
-def _check_persistence(command_node) -> list[tuple[str, Severity, str]]:
+def _check_persistence(command_node: Any) -> list[tuple[str, Severity, str]]:
     """Detect crontab manipulation and shell startup file writes."""
-    hits = []
+    hits: list[tuple[str, Severity, str]] = []
     parts = getattr(command_node, "parts", [])
     if not parts:
         return hits
@@ -250,12 +250,12 @@ def _check_persistence(command_node) -> list[tuple[str, Severity, str]]:
     return hits
 
 
-def _check_sensitive_reads(command_node) -> list[tuple[str, Severity, str, str]]:
+def _check_sensitive_reads(command_node: Any) -> list[tuple[str, Severity, str, str]]:
     """
     Detect reads of sensitive files via cat/head/tail/less/more.
     Returns (rule_id, severity, message, path).
     """
-    hits = []
+    hits: list[tuple[str, Severity, str, str]] = []
     parts = getattr(command_node, "parts", [])
     if not parts:
         return hits
@@ -321,7 +321,7 @@ def analyze_bash_ast(command: str) -> list[BashFinding]:
     return findings
 
 
-def _walk_node(node, raw_command: str) -> list[BashFinding]:
+def _walk_node(node: Any, raw_command: str) -> list[BashFinding]:
     """Recursively walk an AST node and collect findings."""
     results: list[BashFinding] = []
 

@@ -24,17 +24,17 @@ from skillscan_trace.judge.models import JudgeResult, Verdict
 from skillscan_trace.judge.prompt import JUDGE_SYSTEM_PROMPT, build_judge_user_prompt
 
 try:
-    from openai import OpenAI, RateLimitError as OpenAIRateLimitError  # type: ignore
+    from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 except ImportError:
-    OpenAI = None  # type: ignore
-    OpenAIRateLimitError = Exception  # type: ignore
+    OpenAI = None  # type: ignore[assignment,misc]
+    OpenAIRateLimitError = Exception  # type: ignore[assignment,misc]
 
 try:
-    import anthropic  # type: ignore
-    from anthropic import RateLimitError as AnthropicRateLimitError  # type: ignore
+    import anthropic
+    from anthropic import RateLimitError as AnthropicRateLimitError
 except ImportError:
-    anthropic = None  # type: ignore
-    AnthropicRateLimitError = Exception  # type: ignore
+    anthropic = None  # type: ignore[assignment]
+    AnthropicRateLimitError = Exception  # type: ignore[assignment,misc]
 
 logger = logging.getLogger("skillscan_trace.judge")
 
@@ -52,16 +52,16 @@ def _backoff_delay(attempt: int) -> float:
     """Exponential backoff with jitter: base * 2^attempt ± jitter."""
     delay = min(_BASE_DELAY_S * (2 ** attempt), _MAX_DELAY_S)
     jitter = delay * _JITTER * (2 * random.random() - 1)
-    return max(0.0, delay + jitter)
+    return float(max(0.0, delay + jitter))
 
 
 def _is_rate_limit(exc: Exception) -> bool:
     """Return True if the exception is a rate-limit (429) error."""
     # OpenAI SDK raises openai.RateLimitError
-    if OpenAIRateLimitError is not Exception and isinstance(exc, OpenAIRateLimitError):
+    if OpenAIRateLimitError is not Exception and isinstance(exc, OpenAIRateLimitError):  # type: ignore[comparison-overlap]
         return True
     # Anthropic SDK raises anthropic.RateLimitError
-    if AnthropicRateLimitError is not Exception and isinstance(exc, AnthropicRateLimitError):
+    if AnthropicRateLimitError is not Exception and isinstance(exc, AnthropicRateLimitError):  # type: ignore[comparison-overlap]
         return True
     # Fallback: check string representation for 429
     msg = str(exc).lower()
@@ -85,7 +85,8 @@ def _parse_verdict_json(raw: str, model: str) -> dict[str, Any]:
         text = "\n".join(inner).strip()
 
     try:
-        return json.loads(text)
+        result: dict[str, Any] = json.loads(text)
+        return result
     except json.JSONDecodeError as e:
         raise ValueError(f"Judge {model} returned invalid JSON: {e}\nRaw: {raw[:200]}") from e
 
@@ -111,8 +112,8 @@ def _validate_verdict_dict(d: dict[str, Any]) -> dict[str, Any]:
 def run_gpt_judge(
     skill_content: str,
     user_messages: list[str],
-    conversation_transcript: list[dict],
-    canary_findings: list[dict],
+    conversation_transcript: list[dict[str, Any]],
+    canary_findings: list[dict[str, Any]],
     skill_name: str = "",
     skill_description: str = "",
     api_key: str | None = None,
@@ -198,8 +199,8 @@ def run_gpt_judge(
 def run_claude_judge(
     skill_content: str,
     user_messages: list[str],
-    conversation_transcript: list[dict],
-    canary_findings: list[dict],
+    conversation_transcript: list[dict[str, Any]],
+    canary_findings: list[dict[str, Any]],
     skill_name: str = "",
     skill_description: str = "",
     api_key: str | None = None,
@@ -240,7 +241,8 @@ def run_claude_judge(
                 temperature=0.0,
             )
 
-            raw = message.content[0].text if message.content else "{}"
+            first_block = message.content[0] if message.content else None
+            raw = first_block.text if first_block is not None and hasattr(first_block, "text") else "{}"
             d = _parse_verdict_json(raw, model)
             v = _validate_verdict_dict(d)
             latency_ms = (time.time() - start) * 1000

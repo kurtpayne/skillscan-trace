@@ -104,7 +104,7 @@ def run_trace(
     logger.info("User messages: %s", messages_to_run)
 
     # --- Run tool-use loop ---
-    full_transcript: list[dict] = []
+    full_transcript: list[dict[str, Any]] = []
     try:
         full_transcript = _run_tool_use_loop(
             skill=skill,
@@ -175,7 +175,7 @@ def run_trace(
 
 
 def _run_tool_use_loop(
-    skill,
+    skill: Any,
     user_messages: list[str],
     canary: CanaryServer,
     trace_log: TraceLog,
@@ -183,13 +183,13 @@ def _run_tool_use_loop(
     api_key: str,
     base_url: str | None,
     max_turns: int,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Drive the LLM through the tool-use loop for each user message.
 
     Returns the full conversation transcript (all turns, all messages).
     """
-    from openai import OpenAI  # type: ignore
+    from openai import OpenAI
 
     if not api_key:
         raise HarnessError("No API key available (set OPENAI_API_KEY)")
@@ -198,7 +198,7 @@ def _run_tool_use_loop(
     effective_base_url = base_url or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=effective_base_url)
 
-    full_transcript: list[dict] = []
+    full_transcript: list[dict[str, Any]] = []
 
     for msg_idx, user_msg in enumerate(user_messages):
         trace_log.next_turn()
@@ -212,7 +212,10 @@ def _run_tool_use_loop(
 
         turn = 0
         while turn < max_turns:
-            response = client.chat.completions.create(
+            # cast avoids overload mismatch between our plain dicts and the
+            # strict ChatCompletionMessageParam union expected by the openai SDK
+            _create: Any = client.chat.completions.create
+            response = _create(
                 model=model,
                 messages=conversation,
                 tools=TOOL_DEFINITIONS,
@@ -287,7 +290,7 @@ def _run_tool_use_loop(
     return full_transcript
 
 
-def _message_to_dict(message) -> dict[str, Any]:
+def _message_to_dict(message: Any) -> dict[str, Any]:
     """Convert an OpenAI ChatCompletionMessage to a plain dict for the conversation."""
     d: dict[str, Any] = {"role": message.role}
 

@@ -53,7 +53,7 @@ class ResolvedSkill:
     version: str = ""
     extra_metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "resolved_path": self.resolved_path,

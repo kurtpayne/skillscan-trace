@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Any
+
 """
 Judge prompt templates for skillscan-trace.
 
@@ -83,8 +86,8 @@ Do not add any text outside the JSON object.
 def build_judge_user_prompt(
     skill_content: str,
     user_messages: list[str],
-    conversation_transcript: list[dict],
-    canary_findings: list[dict],
+    conversation_transcript: list[dict[str, Any]],
+    canary_findings: list[dict[str, Any]],
     skill_name: str = "",
     skill_description: str = "",
 ) -> str:

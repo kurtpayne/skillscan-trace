@@ -77,7 +77,7 @@ def _synthetic_write_file(path: str, content: str) -> str:
     return f"Written {len(content)} bytes to {path}\n"
 
 
-def _synthetic_http_fetch(url: str, method: str = "GET", headers: dict | None = None) -> str:
+def _synthetic_http_fetch(url: str, method: str = "GET", headers: dict[str, Any] | None = None) -> str:
     """Return a plausible HTTP response with embedded canary values."""
     return json.dumps({
         "status": 200,
@@ -112,7 +112,7 @@ def _synthetic_email_send(
     subject: str,
     body: str,
     cc: str | None = None,
-    attachments: list | None = None,
+    attachments: list[Any] | None = None,
 ) -> str:
     """Return a plausible email send confirmation."""
     return json.dumps({
@@ -145,7 +145,7 @@ def _synthetic_calendar_create(
     start: str,
     end: str,
     description: str | None = None,
-    attendees: list | None = None,
+    attendees: list[Any] | None = None,
     calendar_id: str | None = None,
 ) -> str:
     """Return a plausible calendar event creation response."""
@@ -195,7 +195,7 @@ def _synthetic_github_create_issue(
     repo: str,
     title: str,
     body: str,
-    labels: list | None = None,
+    labels: list[Any] | None = None,
 ) -> str:
     """Return a plausible GitHub issue creation response."""
     return json.dumps({
@@ -232,7 +232,7 @@ def _synthetic_slack_post_message(
     channel: str,
     text: str,
     thread_ts: str | None = None,
-    blocks: list | None = None,
+    blocks: list[Any] | None = None,
 ) -> str:
     """Return a plausible Slack post message response."""
     return json.dumps({
@@ -788,7 +788,7 @@ class TraceLog:
         self.events.append(event)
         self.findings.extend(event.findings)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "events": [e.to_dict() for e in self.events],
             "findings": [f.to_dict() for f in self.findings],
@@ -889,7 +889,7 @@ async def run_mcp_server(
     This is used when the harness launches the server as a subprocess and
     communicates via the MCP protocol over stdin/stdout.
     """
-    from mcp.server.fastmcp import FastMCP  # type: ignore
+    from mcp.server.fastmcp import FastMCP
 
     mcp_server = FastMCP("skillscan-canary")
     canary = CanaryServer(trace_log=trace_log, allowed_domains=allowed_domains)
@@ -914,7 +914,7 @@ async def run_mcp_server(
         return canary.handle_tool_call("write_file", {"path": path, "content": content})
 
     @mcp_server.tool()
-    def http_fetch(url: str, method: str = "GET", headers: dict | None = None, body: str | None = None) -> str:
+    def http_fetch(url: str, method: str = "GET", headers: dict[str, Any] | None = None, body: str | None = None) -> str:
         """Make an HTTP request and return the response."""
         return canary.handle_tool_call("http_fetch", {
             "url": url, "method": method,
@@ -936,7 +936,7 @@ async def run_mcp_server(
         subject: str,
         body: str,
         cc: str | None = None,
-        attachments: list | None = None,
+        attachments: list[Any] | None = None,
     ) -> str:
         """Send an email message."""
         return canary.handle_tool_call("email_send", {
@@ -968,7 +968,7 @@ async def run_mcp_server(
         start: str,
         end: str,
         description: str | None = None,
-        attendees: list | None = None,
+        attendees: list[Any] | None = None,
         calendar_id: str | None = None,
     ) -> str:
         """Create a calendar event."""
@@ -1000,7 +1000,7 @@ async def run_mcp_server(
         repo: str,
         title: str,
         body: str,
-        labels: list | None = None,
+        labels: list[Any] | None = None,
     ) -> str:
         """Create a GitHub issue in a repository."""
         return canary.handle_tool_call("github_create_issue", {
@@ -1030,7 +1030,7 @@ async def run_mcp_server(
         channel: str,
         text: str,
         thread_ts: str | None = None,
-        blocks: list | None = None,
+        blocks: list[Any] | None = None,
     ) -> str:
         """Post a message to a Slack channel or DM."""
         return canary.handle_tool_call("slack_post_message", {
