@@ -32,6 +32,12 @@ from skillscan_trace.config import load_config, merge_config
 
 console = Console()
 
+# Optional dependency for --remote-host; None if not installed
+try:
+    import requests as req_lib  # noqa: F401
+except ImportError:
+    req_lib = None  # type: ignore[assignment]
+
 
 def _load_dotenv() -> None:
     """Load .env from cwd and all parent directories (nearest wins).
@@ -250,6 +256,28 @@ def _resolve_provider(
     default=None,
     help="Exit with code 1 if any malicious skill is detected (for CI).",
 )
+@click.option(
+    "--models",
+    "multi_models",
+    default=None,
+    help=(
+        "Comma-separated list of models to trace and compare. "
+        "When set, --model is ignored and a MultiModelReport is produced. "
+        "Example: --models gpt-4.1-mini,openai/gpt-4o "
+        "(use --provider openrouter for cross-provider model names)."
+    ),
+)
+@click.option(
+    "--remote-host",
+    default=None,
+    envvar="SKILLSCAN_TRACE_REMOTE_HOST",
+    help=(
+        "Submit the trace to a remote skillscan-trace server instead of running locally. "
+        "Example: --remote-host https://trace.example.com "
+        "The --api-key is forwarded to the server (BYOK). "
+        "Set SKILLSCAN_TRACE_REMOTE_HOST env var to avoid repeating the flag."
+    ),
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -269,6 +297,8 @@ def run(
     anthropic_api_key: str | None,
     quiet: bool,
     fail_on_malicious: bool | None,
+    multi_models: str | None,
+    remote_host: str | None,
 ) -> None:
     """Run a behavioral trace on SKILL (file or directory)."""
     # Merge config file values with CLI flags (CLI wins)
@@ -302,6 +332,45 @@ def run(
 
     base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
     from skillscan_trace.formatters import format_sarif, format_batch_summary
+
+    # ── Remote mode (B5) ──────────────────────────────────────────────────────
+    if remote_host:
+        _run_remote(
+            skill=skill,
+            remote_host=remote_host.rstrip("/"),
+            api_key=api_key,
+            provider=provider,
+            model=model,
+            variants=variants,
+            max_turns=max_turns,
+            output_dir=output_dir or "trace-output",
+            output_format=output_format or "json",
+            judge=judge or False,
+            quiet=quiet,
+        )
+        return
+
+    # ── Multi-model mode (B4) ─────────────────────────────────────────────────
+    if multi_models:
+        model_list = [m.strip() for m in multi_models.split(",") if m.strip()]
+        if len(model_list) < 2:
+            raise click.UsageError("--models requires at least two comma-separated model names.")
+        _run_multi_model(
+            skill=skill,
+            models=model_list,
+            api_key=api_key,
+            base_url=base_url,
+            input_model=input_model,
+            variants=variants,
+            max_turns=max_turns,
+            output_dir=output_dir or "trace-output",
+            output_format=output_format or "json",
+            judge=judge or False,
+            anthropic_api_key=anthropic_api_key,
+            quiet=quiet,
+            fail_on_malicious=fail_on_malicious or False,
+        )
+        return
 
     # Collect skill files
     skill_path = Path(skill)
@@ -400,6 +469,195 @@ def run(
             sys.exit(2)
         if has_errors:
             sys.exit(3)
+
+
+def _run_multi_model(
+    skill: str,
+    models: list[str],
+    api_key: str | None,
+    base_url: str | None,
+    input_model: str,
+    variants: int,
+    max_turns: int,
+    output_dir: str,
+    output_format: str,
+    judge: bool,
+    anthropic_api_key: str | None,
+    quiet: bool,
+    fail_on_malicious: bool,
+) -> None:
+    """Run a multi-model trace and write a MultiModelReport."""
+    from skillscan_trace.multi_model import run_multi_model_trace
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not quiet:
+        console.print(f"[cyan]Multi-model trace: {', '.join(models)}[/cyan]")
+
+    mmr = run_multi_model_trace(
+        skill_path=skill,
+        models=models,
+        api_key=api_key,
+        base_url=base_url,
+        input_count=variants,
+        input_model=input_model,
+        max_turns=max_turns,
+        judge=judge,
+        anthropic_api_key=anthropic_api_key,
+    )
+
+    # Display summary
+    if not quiet:
+        agreement_color = {
+            "full_agreement": "bold green",
+            "partial_agreement": "bold yellow",
+            "disagreement": "bold red",
+            "no_verdict": "dim",
+        }.get(mmr.agreement, "white")
+        console.print(
+            f"\n[bold]Multi-model trace complete[/bold] — "
+            f"[{agreement_color}]{mmr.agreement}[/{agreement_color}]"
+        )
+        if mmr.consensus_verdict:
+            verdict_color = {
+                "malicious": "bold red",
+                "benign": "bold green",
+                "uncertain": "bold yellow",
+            }.get(mmr.consensus_verdict, "white")
+            console.print(
+                f"Consensus verdict: [{verdict_color}]{mmr.consensus_verdict.upper()}[/{verdict_color}]"
+            )
+
+        table = Table(title="Per-Model Results", show_header=True)
+        table.add_column("Model")
+        table.add_column("Verdict")
+        table.add_column("Findings")
+        table.add_column("Error")
+        for r in mmr.results:
+            v_color = {
+                "malicious": "red",
+                "benign": "green",
+                "uncertain": "yellow",
+            }.get(r.verdict or "", "dim")
+            table.add_row(
+                r.model,
+                f"[{v_color}]{r.verdict or 'n/a'}[/{v_color}]",
+                str(r.finding_count),
+                r.error[:60] if r.error else "",
+            )
+        console.print(table)
+
+    # Write output
+    skill_stem = Path(skill).stem
+    out_file = out_dir / f"{skill_stem}.multi.json"
+    out_file.write_text(json.dumps(mmr.to_dict(), indent=2, default=str))
+    if not quiet:
+        console.print(f"[green]Multi-model report written to {out_file}[/green]")
+
+    # Exit codes for CI
+    if fail_on_malicious and mmr.consensus_verdict == "malicious":
+        sys.exit(1)
+
+
+def _run_remote(
+    skill: str,
+    remote_host: str,
+    api_key: str | None,
+    provider: str | None,
+    model: str,
+    variants: int,
+    max_turns: int,
+    output_dir: str,
+    output_format: str,
+    judge: bool,
+    quiet: bool,
+) -> None:
+    """Submit a trace to a remote skillscan-trace server and poll for results."""
+    global req_lib
+    if req_lib is None:
+        console.print("[red]--remote-host requires the 'requests' package.[/red]")
+        console.print("Install with: [bold]pip install requests[/bold]")
+        sys.exit(1)
+
+    skill_path = Path(skill)
+    skill_content = skill_path.read_text(encoding="utf-8")
+
+    if not quiet:
+        console.print(f"[cyan]Submitting trace to {remote_host}...[/cyan]")
+
+    payload: dict[str, Any] = {
+        "skill_content": skill_content,
+        "model": model,
+        "variants": variants,
+        "max_turns": max_turns,
+        "judge": judge,
+    }
+    if api_key:
+        payload["api_key"] = api_key
+    if provider:
+        payload["provider"] = provider
+
+    try:
+        resp = req_lib.post(
+            f"{remote_host}/v1/submit",
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        console.print(f"[red]Failed to submit trace: {e}[/red]")
+        sys.exit(1)
+
+    job_id = resp.json().get("job_id")
+    if not job_id:
+        console.print(f"[red]Server did not return a job_id: {resp.text[:200]}[/red]")
+        sys.exit(1)
+
+    if not quiet:
+        console.print(f"[dim]Job ID: {job_id} — polling for results...[/dim]")
+
+    # Poll until done
+    poll_interval = 3  # seconds
+    max_wait = 600  # 10 minutes
+    waited = 0
+    while waited < max_wait:
+        time.sleep(poll_interval)
+        waited += poll_interval
+        try:
+            poll = req_lib.get(f"{remote_host}/v1/report/{job_id}", timeout=10)
+        except Exception as e:
+            console.print(f"[yellow]Poll error (retrying): {e}[/yellow]")
+            continue
+
+        if poll.status_code == 202:
+            status = poll.json().get("status", "pending")
+            if not quiet:
+                console.print(f"[dim]  {status}...[/dim]")
+            continue
+
+        if poll.status_code == 200:
+            result = poll.json()
+            out_dir = Path(output_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            skill_stem = skill_path.stem
+            out_file = out_dir / f"{skill_stem}.remote.json"
+            out_file.write_text(json.dumps(result, indent=2, default=str))
+            if not quiet:
+                findings = result.get("findings", [])
+                console.print(
+                    f"\n[bold]Remote trace complete[/bold] — "
+                    f"{result.get('total_tool_calls', 0)} tool call(s), "
+                    f"{len(findings)} finding(s)"
+                )
+                console.print(f"[green]Report written to {out_file}[/green]")
+            return
+
+        console.print(f"[red]Unexpected poll status {poll.status_code}: {poll.text[:200]}[/red]")
+        sys.exit(1)
+
+    console.print(f"[red]Timed out waiting for remote trace (>{max_wait}s)[/red]")
+    sys.exit(1)
 
 
 def _run_single(
