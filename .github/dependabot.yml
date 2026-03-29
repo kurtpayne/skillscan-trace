@@ -8,6 +8,23 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    groups:
+      mcp-stack:
+        patterns:
+          - "mcp*"
+          - "anyio"
+          - "httpx"
+      llm-clients:
+        patterns:
+          - "openai"
+          - "anthropic"
+          - "litellm"
+      dev-tools:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest*"
+          - "coverage"
 
   - package-ecosystem: "github-actions"
     directory: "/"
