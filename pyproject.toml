@@ -7,13 +7,13 @@ name = "skillscan-trace"
 version = "0.2.0"
 description = "Behavioral execution engine for MCP-based AI agent skills"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 keywords = ["security", "ai", "agents", "mcp", "behavioral-analysis"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3.11",
     "Topic :: Security",
 ]
