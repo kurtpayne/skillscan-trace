@@ -25,7 +25,9 @@ from typing import Any
 
 import click
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from skillscan_trace.config import load_config, merge_config
@@ -792,24 +794,44 @@ def _display_report(report: Any) -> None:
     # Judge verdict
     if report.judge_result is not None:
         jr = report.judge_result
-        verdict_color = {
-            "malicious": "bold red",
-            "benign": "bold green",
-            "uncertain": "bold yellow",
-        }.get(jr.final_verdict.value, "white")
+        verdict_val = jr.final_verdict.value  # "malicious" | "benign" | "uncertain"
+
+        # Inline detail lines (dim, shown above the banner)
         console.print(
-            f"\n[bold]Judge verdict:[/bold] [{verdict_color}]{jr.final_verdict.value.upper()}"
-            f"[/{verdict_color}] ({jr.agreement.value})"
-        )
-        if jr.needs_human_review:
-            console.print("[bold yellow]⚠ Flagged for human review[/bold yellow]")
-        console.print(
-            f"[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%})"
+            f"\n[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%})"
             f" — {jr.judge_a.reasoning[:120]}[/dim]"
         )
         console.print(
             f"[dim]Claude:  {jr.judge_b.verdict.value} ({jr.judge_b.confidence:.0%})"
             f" — {jr.judge_b.reasoning[:120]}[/dim]"
+        )
+
+        # Verdict banner — prominent Rich Panel
+        _VERDICT_STYLES: dict[str, tuple[str, str, str]] = {
+            "malicious":  ("bold white on red",   "red",    "\u2716 MALICIOUS"),
+            "benign":     ("bold white on green",  "green",  "\u2714 BENIGN"),
+            "uncertain":  ("bold black on yellow", "yellow", "\u26a0 UNCERTAIN"),
+        }
+        text_style, border_style, label = _VERDICT_STYLES.get(
+            verdict_val, ("bold white", "white", verdict_val.upper())
+        )
+        finding_count = report.total_findings
+        agreement_str = jr.agreement.value.replace("_", " ")
+        subtitle_parts = [f"agreement: {agreement_str}"]
+        if finding_count:
+            subtitle_parts.append(f"{finding_count} finding(s)")
+        if jr.needs_human_review:
+            subtitle_parts.append("\u26a0 human review flagged")
+        subtitle = "  |  ".join(subtitle_parts)
+
+        banner_text = Text(label, style=text_style, justify="center")
+        console.print(
+            Panel(
+                banner_text,
+                subtitle=f"[dim]{subtitle}[/dim]",
+                border_style=border_style,
+                padding=(0, 4),
+            )
         )
 
 
