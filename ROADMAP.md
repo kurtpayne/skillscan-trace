@@ -1,14 +1,14 @@
 # skillscan-trace Roadmap
 
-**Last updated:** 2026-03-28
+**Last updated:** 2026-03-29
 
-skillscan-trace is a behavioral execution engine for MCP-based AI agent skills. The core CLI is complete (v0.1.0, 176 tests passing). This roadmap covers the path from current state to public open-source release and an optional hosted scan service.
+skillscan-trace is a behavioral execution engine for MCP-based AI agent skills. The core CLI is complete (v0.2.0, 199 tests passing). This roadmap covers the path from current state to public open-source release and an optional hosted scan service.
 
 ---
 
 ## Phase A — Public Release Readiness (✅ Complete)
 
-All Phase A items are done. The repo is ready to go public.
+All Phase A items are done. The repo is public.
 
 | Item | Description | Status |
 |---|---|---|
@@ -35,15 +35,25 @@ The `serve` mode exposes three endpoints: `POST /v1/submit`, `GET /v1/report/{id
 
 ---
 
-## Phase B — Open-Source Launch
+## Phase B — Open-Source Launch (✅ Mostly Complete)
 
 | Item | Description | Status |
 |---|---|---|
-| B1 | Make `skillscan-trace` repo public | Planned |
-| B2 | Website /trace page (data flow diagram, provider guides, sample report, quick-start) | Planned |
-| B3 | GitHub Action (`skillscan/trace-action` — OIDC-based for public repos, PR comment with report URL) | Planned |
-| B4 | Multi-model trace (run against 2+ models via OpenRouter, report agreement/disagreement) | Planned |
-| B5 | `--remote` flag in CLI + `source_url` URL-reachability verification on server side | Planned |
+| B1 | Make `skillscan-trace` repo public | ✅ Done |
+| B2 | Website /trace page (data flow diagram, provider guides, sample report, quick-start) | ✅ Done |
+| B3 | GitHub Action (`skillscan/trace-action` — OIDC-based for public repos, PR comment with report URL) | 🔲 Deferred to Phase C |
+| B4 | Multi-model trace (run against 2+ models via OpenRouter, report agreement/disagreement) | ✅ Done (`--models` flag + `MultiModelReport`) |
+| B5 | `--remote-host` flag in CLI + `source_url` URL-reachability validation in serve | ✅ Done |
+
+**B1 — Public.** Repo is public at `github.com/kurtpayne/skillscan-trace`.
+
+**B2 — Website.** `/trace` page live on the SkillScan website. Covers provider setup (OpenAI, Anthropic, OpenRouter, Ollama), data flow, sample trace output, and quick-start.
+
+**B4 — Multi-model.** `skillscan-trace run skill.md --models gpt-4.1-mini,anthropic/claude-3-haiku` runs the trace against each model independently and writes a `MultiModelReport` showing agreement/disagreement per finding.
+
+**B5 — Remote.** `--remote-host https://trace.example.com` submits the skill to a self-hosted `serve` instance. `source_url` field on `POST /v1/submit` accepts public GitHub raw URLs; the server validates the host is `raw.githubusercontent.com`, `github.com`, or `gist.githubusercontent.com`.
+
+**B3 — GitHub Action (deferred).** The `skillscan/trace-action` Action (OIDC-based, PR comment with report URL) is deferred to Phase C. It depends on the hosted reporting infrastructure (C1–C3) to produce a stable report URL to post as a PR comment. Building the Action before the hosted service exists would produce a local-only artifact with no shareable URL.
 
 ---
 
@@ -68,8 +78,9 @@ The hosted service is a thin wrapper around the same Docker image. The user brin
 | C1 | Report storage (Cloudflare R2) + permanent report URLs | Planned |
 | C2 | SHA-based report cache (avoid re-scanning identical skills) | Planned |
 | C3 | GitHub OIDC verification for Actions integration | Planned |
-| C4 | Corpus feedback loop — batch traces against skillscan-security corpus | Planned |
-| C5 | Falco + eBPF secondary layer (catches subprocess spawning, raw syscalls) | Future |
+| C4 | GitHub Action (`skillscan/trace-action`) — depends on C1–C3 for stable report URL | Planned |
+| C5 | Corpus feedback loop — batch traces against skillscan-security corpus | Planned |
+| C6 | Falco + eBPF secondary layer (catches subprocess spawning, raw syscalls) | Future |
 
 **Launch gate for hosted service:** False positive rate on benign skills below 2% and detection rate on `corpus/malicious/` above 85%.
 
@@ -80,6 +91,6 @@ The hosted service is a thin wrapper around the same Docker image. The user brin
 | Version | Status | Description |
 |---|---|---|
 | 0.1.0 | ✅ Released | Core CLI complete — Phases 1–5 implemented, 176/176 tests passing |
-| 0.2.0 | ✅ Ready to tag | Phase A complete — provider UX, config system, Docker image, PRIVACY.md, bashlex |
-| 0.3.0 | Planned | Phase B — open-source public launch, website /trace page, GitHub Action |
+| 0.2.0 | ✅ Released | Phase A complete — provider UX, config system, Docker image, PRIVACY.md, bashlex |
+| 0.3.0 | ✅ Released | Phase B complete — repo public, website /trace page, multi-model trace, --remote-host |
 | 1.0.0 | Future | Phase C — hosted BYOK service, detection quality gate met |
