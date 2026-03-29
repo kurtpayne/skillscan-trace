@@ -41,7 +41,7 @@ The model runs locally via [Ollama](https://ollama.com/) — no API key required
 
 ## Status
 
-**v0.1.0 — core CLI complete.** Phases 1–5 are implemented and 144/144 tests pass. The tool is installable and usable today.
+**v0.2.0 — verdict banner + full CI matrix.** All phases implemented and 199/199 tests pass across Python 3.11, 3.12, and 3.13. The tool is installable and usable today.
 
 See [`SPEC.md`](./SPEC.md) for the full behavioral specification.  
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the system design.  
@@ -66,7 +66,8 @@ export OPENROUTER_API_KEY=sk-or-...
 skillscan-trace run ./skill/ --provider openrouter --model mistralai/mistral-7b-instruct
 
 # Run with a local Ollama model (no API key required)
-skillscan-trace run ./skill/ --provider ollama --model qwen2.5:7b
+# Model must support tool calling — llama3.1:8b and llama3.2:3b are verified
+skillscan-trace run ./skill/ --provider ollama --model llama3.1:8b
 
 # Run with explicit base URL (Azure, Mistral, etc.)
 skillscan-trace run ./skill/ --base-url https://api.mistral.ai/v1 --api-key $MISTRAL_KEY
@@ -114,7 +115,7 @@ Every trace produces a JSON trace report and optionally a SARIF report.
   },
   "model": {
     "provider": "ollama",
-    "model": "qwen2.5:7b",
+    "model": "llama3.1:8b",
     "version": "..."
   },
   "prompt": "Help me commit my changes",
@@ -159,4 +160,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## License
 
-MIT
+Apache-2.0
