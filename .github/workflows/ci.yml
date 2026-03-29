@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -r requirements-dev.lock && pip install -e ".[dev]" --no-deps
 
       - name: Format check (ruff)
         if: matrix.python-version == '3.11'
