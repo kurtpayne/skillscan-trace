@@ -808,9 +808,9 @@ def _display_report(report: Any) -> None:
 
         # Verdict banner — prominent Rich Panel
         _VERDICT_STYLES: dict[str, tuple[str, str, str]] = {
-            "malicious":  ("bold white on red",   "red",    "\u2716 MALICIOUS"),
-            "benign":     ("bold white on green",  "green",  "\u2714 BENIGN"),
-            "uncertain":  ("bold black on yellow", "yellow", "\u26a0 UNCERTAIN"),
+            "malicious": ("bold white on red", "red", "\u2716 MALICIOUS"),
+            "benign": ("bold white on green", "green", "\u2714 BENIGN"),
+            "uncertain": ("bold black on yellow", "yellow", "\u26a0 UNCERTAIN"),
         }
         text_style, border_style, label = _VERDICT_STYLES.get(
             verdict_val, ("bold white", "white", verdict_val.upper())
