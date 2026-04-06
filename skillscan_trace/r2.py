@@ -26,7 +26,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_REPORT_BASE_URL = os.environ.get("TRACE_REPORT_BASE_URL", "https://trace.skillscan.dev")
+_REPORT_BASE_URL = os.environ.get("TRACE_REPORT_BASE_URL", "https://trace.skillscan.sh")
 
 
 def _client() -> Any | None:

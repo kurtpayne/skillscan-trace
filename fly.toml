@@ -11,7 +11,7 @@ primary_region = "iad"
 [env]
   R2_ACCOUNT_ID = "b5cdaad4db136b796354280697e0ceb9"
   R2_BUCKET = "skillscan-trace-reports"
-  TRACE_REPORT_BASE_URL = "https://trace.skillscan.dev"
+  TRACE_REPORT_BASE_URL = "https://trace.skillscan.sh"
   PYTHONUNBUFFERED = "1"
 
 [http_service]

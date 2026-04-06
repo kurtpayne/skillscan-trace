@@ -2,9 +2,9 @@ name = "skillscan-trace-api"
 main = "worker.js"
 compatibility_date = "2024-09-23"
 
-# Route: trace.skillscan.dev → this worker
+# Route: trace.skillscan.sh → this worker
 # Set via CF dashboard: Workers & Pages → skillscan-trace-api → Settings → Triggers
-# Route pattern: trace.skillscan.dev/*
+# Route pattern: trace.skillscan.sh/*
 
 [vars]
 FLY_APP_URL = "https://skillscan-trace.fly.dev"

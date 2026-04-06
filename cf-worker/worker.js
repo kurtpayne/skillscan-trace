@@ -14,14 +14,14 @@
  */
 
 const RATE_LIMIT_PER_HOUR = 5;
-const CORS_ORIGIN = "https://skillscan.dev";
+const CORS_ORIGIN = "https://skillscan.sh";
 
 // ── CORS helpers ──────────────────────────────────────────────────────────────
 
 function corsHeaders(origin) {
   const allowed = [
-    "https://skillscan.dev",
-    "https://www.skillscan.dev",
+    "https://skillscan.sh",
+    "https://www.skillscan.sh",
     "http://localhost:5173",
     "http://localhost:3000",
   ];
@@ -138,7 +138,7 @@ async function handleSubmit(request, env) {
         status: "done",
         cached: true,
         job_id: cacheKey,
-        report_url: cached.report_url || `https://trace.skillscan.dev/report/${cacheKey}`,
+        report_url: cached.report_url || `https://trace.skillscan.sh/report/${cacheKey}`,
         result: cached,
       },
       200,
