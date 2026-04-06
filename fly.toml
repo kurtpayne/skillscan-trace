@@ -1,0 +1,41 @@
+# fly.toml — skillscan-trace hosted service
+# Deploy: fly deploy --app skillscan-trace
+# Secrets: fly secrets set R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... --app skillscan-trace
+
+app = "skillscan-trace"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  R2_ACCOUNT_ID = "b5cdaad4db136b796354280697e0ceb9"
+  R2_BUCKET = "skillscan-trace-reports"
+  TRACE_REPORT_BASE_URL = "https://trace.skillscan.dev"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 10
+    soft_limit = 5
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[checks]
+  [checks.health]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/v1/health"
+    port = 8080
+    timeout = "10s"
+    type = "http"

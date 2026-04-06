@@ -127,7 +127,14 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         cache_key = _cache_key(skill_content, model)
         cached = _read_cache(cache_dir, cache_key)
         if cached:
-            job.result = {**cached, "cached": True, "job_id": job.job_id}
+            from skillscan_trace.r2 import read_report as _r2_read
+            from skillscan_trace.r2 import _REPORT_BASE_URL as _base_url
+
+            r2_cached = _r2_read(cache_key)
+            report_url: str | None = (r2_cached or {}).get(
+                "report_url", f"{_base_url}/report/{cache_key}"
+            )
+            job.result = {**cached, "cached": True, "job_id": job.job_id, "report_url": report_url}
             job.status = JobStatus.DONE
             job.finished_at = time.time()
             return
@@ -159,10 +166,19 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         finally:
             Path(skill_path).unlink(missing_ok=True)
 
-        # Cache the result (without the api_key)
+        # Cache the result locally, then persist to R2 if configured.
         _write_cache(cache_dir, cache_key, result_dict)
 
-        job.result = {**result_dict, "cached": False, "job_id": job.job_id}
+        from skillscan_trace.r2 import write_report as _r2_write
+
+        report_url: str | None = _r2_write(cache_key, result_dict)
+
+        job.result = {
+            **result_dict,
+            "cached": False,
+            "job_id": job.job_id,
+            "report_url": report_url,
+        }
         job.status = JobStatus.DONE
         job.finished_at = time.time()
 

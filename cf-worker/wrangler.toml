@@ -1,0 +1,23 @@
+name = "skillscan-trace-api"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# Route: trace.skillscan.dev → this worker
+# Set via CF dashboard: Workers & Pages → skillscan-trace-api → Settings → Triggers
+# Route pattern: trace.skillscan.dev/*
+
+[vars]
+FLY_APP_URL = "https://skillscan-trace.fly.dev"
+
+# R2 bucket binding — gives the worker direct read access to reports
+# without needing S3 credentials (CF Workers use the R2 API natively)
+[[r2_buckets]]
+binding = "TRACE_REPORTS"
+bucket_name = "skillscan-trace-reports"
+
+# KV namespace for IP rate limiting
+# Create with: wrangler kv namespace create RATE_LIMIT
+# Then paste the id below.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
