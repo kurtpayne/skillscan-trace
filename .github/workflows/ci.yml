@@ -28,12 +28,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.lock && pip install -e ".[dev]" --no-deps
 
-      - name: Install pre-commit
-        if: matrix.python-version == '3.11'
-        run: pip install pre-commit
-      - name: Run pre-commit
-        if: matrix.python-version == '3.11'
-        run: pre-commit run --all-files
       - name: Format check (ruff)
         if: matrix.python-version == '3.11'
         run: ruff format --check .
