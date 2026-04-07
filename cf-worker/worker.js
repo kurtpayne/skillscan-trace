@@ -122,11 +122,33 @@ async function handleSubmit(request, env) {
     return json({ error: "Invalid JSON body" }, 400, origin);
   }
 
-  const skillContent = (body.skill_content || "").trim();
+  let skillContent = (body.skill_content || "").trim();
   const model = body.model || "gpt-4.1-mini";
 
+  // If skill_content is empty but source_url is provided, fetch it server-side
+  // (browsers can't fetch raw.githubusercontent.com due to CORS)
+  if (!skillContent && body.source_url) {
+    try {
+      const srcResp = await fetch(body.source_url, {
+        headers: { "User-Agent": "skillscan-trace-worker/1.0" },
+        redirect: "follow",
+      });
+      if (!srcResp.ok) {
+        return json(
+          { error: `Could not fetch source_url: HTTP ${srcResp.status}` },
+          422,
+          origin
+        );
+      }
+      skillContent = (await srcResp.text()).trim();
+      body.skill_content = skillContent;
+    } catch (e) {
+      return json({ error: `Could not fetch source_url: ${e.message}` }, 422, origin);
+    }
+  }
+
   if (!skillContent) {
-    return json({ error: "skill_content is required" }, 400, origin);
+    return json({ error: "skill_content or source_url is required" }, 400, origin);
   }
 
   // R2 cache check
