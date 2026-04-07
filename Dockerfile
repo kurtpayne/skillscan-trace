@@ -24,7 +24,7 @@
 #       -v $(pwd)/my-skill.md:/skill.md:ro \
 #       skillscan/trace run /skill.md --provider ollama
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Security: run as non-root
 RUN groupadd --gid 1001 skillscan && \
