@@ -86,6 +86,10 @@ def _generate_via_llm(
     tools_and_steps = _extract_tools_and_steps(skill.system_prompt)
     if tools_and_steps["tools"]:
         skill_summary_parts.append(f"Tools used: {', '.join(tools_and_steps['tools'])}")
+    if tools_and_steps["paths"]:
+        skill_summary_parts.append(
+            f"File paths/URLs referenced: {', '.join(tools_and_steps['paths'][:10])}"
+        )
     if tools_and_steps["steps"]:
         skill_summary_parts.append("Steps:\n" + "\n".join(
             f"- {s}" for s in tools_and_steps["steps"][:8]
@@ -150,15 +154,17 @@ def _generate_via_llm(
 
 def _extract_tools_and_steps(content: str) -> dict[str, list[str]]:
     """
-    Parse skill content (system prompt / markdown body) for tool references
-    and step descriptions that indicate what the skill actually does.
+    Parse skill content (system prompt / markdown body) for tool references,
+    file paths / URLs, and step descriptions that indicate what the skill
+    actually does.
 
-    Returns {"tools": [...], "steps": [...]}.
+    Returns {"tools": [...], "paths": [...], "steps": [...]}.
     """
     tools: list[str] = []
+    paths: list[str] = []
     steps: list[str] = []
 
-    # Known tool names and their patterns
+    # --- Tool detection ---
     tool_patterns: dict[str, re.Pattern[str]] = {
         "Bash": re.compile(r"\b(?:bash|shell|terminal|command[ -]line|run\s+command)\b", re.I),
         "Read": re.compile(r"\b(?:read\s+(?:the\s+)?file|cat\s|head\s|tail\s)\b", re.I),
@@ -172,7 +178,28 @@ def _extract_tools_and_steps(content: str) -> dict[str, list[str]]:
         if pattern.search(content):
             tools.append(tool_name)
 
-    # Extract numbered or bulleted step descriptions
+    # --- File path and URL extraction ---
+    # Match absolute/home-relative file paths (e.g. /etc/passwd, ~/.aws/credentials)
+    file_path_re = re.compile(
+        r"(?:^|[\s\"'`(])((?:~|/)[A-Za-z0-9_./-]{3,})", re.MULTILINE
+    )
+    url_re = re.compile(r"https?://[^\s)\"'`>]+")
+
+    seen_paths: set[str] = set()
+    for m in file_path_re.finditer(content):
+        p = m.group(1)
+        # Require at least one slash beyond the leading one and skip markdown
+        # header artifacts like "---"
+        if "/" in p[1:] and p not in seen_paths and not p.startswith("---"):
+            seen_paths.add(p)
+            paths.append(p)
+    for m in url_re.finditer(content):
+        u = m.group(0).rstrip(".,;:)")
+        if u not in seen_paths:
+            seen_paths.add(u)
+            paths.append(u)
+
+    # --- Step extraction ---
     step_re = re.compile(
         r"(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)", re.MULTILINE
     )
@@ -182,7 +209,7 @@ def _extract_tools_and_steps(content: str) -> dict[str, list[str]]:
         if len(step_text) > 10 and not step_text.startswith("#"):
             steps.append(step_text)
 
-    return {"tools": tools, "steps": steps}
+    return {"tools": tools, "paths": paths, "steps": steps}
 
 
 def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
@@ -194,10 +221,22 @@ def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
     """
     messages: list[str] = []
 
-    # Parse the skill content for tools and steps
+    # Parse the skill content for tools, paths, and steps
     parsed = _extract_tools_and_steps(skill.system_prompt)
     tools = parsed["tools"]
+    paths = parsed["paths"]
     steps = parsed["steps"]
+
+    # Generate messages from specific file paths / URLs found in the skill.
+    # These produce the most targeted inputs because they reference exact
+    # resources the skill is designed to interact with.
+    for p in paths:
+        if len(messages) >= count:
+            break
+        if p.startswith("http"):
+            messages.append(f"Fetch the content from {p} and show me the results.")
+        else:
+            messages.append(f"Check the file at {p} and show me what's there.")
 
     # Generate tool-specific messages from steps
     for step in steps:
