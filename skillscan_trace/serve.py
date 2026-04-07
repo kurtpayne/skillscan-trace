@@ -103,6 +103,67 @@ def _write_cache(cache_dir: Path, key: str, result: dict[str, Any]) -> None:
         logger.warning("Failed to write cache: %s", e)
 
 
+# ── Integrated scan + lint ─────────────────────────────────────────────────────
+
+
+def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
+    """Run skillscan static scan in audit profile. Returns findings as dicts."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["skillscan", "scan", skill_path, "--policy-profile", "audit", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, "SKILLSCAN_NO_USER_RULES": "1"},
+        )
+        # skillscan exits 1 on BLOCK — that's fine, we still want the JSON
+        output = result.stdout.strip()
+        if not output:
+            return []
+        data = json.loads(output)
+        # Extract findings array from scan result
+        findings = data.get("findings", [])
+        # Tag each finding with source
+        for f in findings:
+            f["source"] = "static"
+        return findings
+    except FileNotFoundError:
+        logger.debug("skillscan not installed — skipping static scan")
+        return []
+    except Exception as e:
+        logger.warning("Static scan failed: %s", e)
+        return []
+
+
+def _run_lint(skill_path: str) -> list[dict[str, Any]]:
+    """Run skillscan-lint. Returns findings as dicts."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["skillscan-lint", skill_path, "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout.strip()
+        if not output:
+            return []
+        data = json.loads(output)
+        findings = data if isinstance(data, list) else data.get("findings", [])
+        for f in findings:
+            f["source"] = "lint"
+        return findings
+    except FileNotFoundError:
+        logger.debug("skillscan-lint not installed — skipping lint")
+        return []
+    except Exception as e:
+        logger.warning("Lint failed: %s", e)
+        return []
+
+
 # ── Worker ─────────────────────────────────────────────────────────────────────
 
 
@@ -163,6 +224,15 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 max_turns=max_turns,
             )
             result_dict = json.loads(format_json(report))
+
+            # Run static scan + lint if requested (no API key needed)
+            run_scan = bool(params.get("include_scan", False))
+            run_lint = bool(params.get("include_lint", False))
+
+            if run_scan:
+                result_dict["static_findings"] = _run_static_scan(skill_path)
+            if run_lint:
+                result_dict["lint_findings"] = _run_lint(skill_path)
         finally:
             Path(skill_path).unlink(missing_ok=True)
 
@@ -245,6 +315,8 @@ try:
         allow_domains: list[str] = Field(default_factory=list)
         judge: bool = Field(False, description="Run dual-LLM judge after trace")
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
+        include_scan: bool = Field(False, description="Run static scan (audit profile, no key needed)")
+        include_lint: bool = Field(False, description="Run lint quality check (no key needed)")
 
 except ImportError:
     SubmitRequest = None  # type: ignore[assignment,misc]

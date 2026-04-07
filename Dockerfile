@@ -43,8 +43,10 @@ RUN apt-get update && \
 COPY pyproject.toml README.md ./
 COPY skillscan_trace/ ./skillscan_trace/
 
-# Install with serve extras
-RUN pip install --no-cache-dir ".[serve]"
+# Install with serve extras + scanner and linter for integrated analysis
+RUN pip install --no-cache-dir ".[serve]" \
+    skillscan-security \
+    skillscan-lint
 
 # Create directories with correct ownership
 RUN mkdir -p /trace-output /trace-cache && \
