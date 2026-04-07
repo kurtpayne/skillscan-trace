@@ -288,8 +288,6 @@ def create_app(
         judge: bool = Field(False, description="Run dual-LLM judge after trace")
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
 
-        model_config = {"extra": "ignore"}
-
     @app.get("/v1/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "version": "0.1.0"}
