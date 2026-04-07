@@ -166,12 +166,15 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         finally:
             Path(skill_path).unlink(missing_ok=True)
 
-        # Cache the result locally, then persist to R2 if configured.
-        _write_cache(cache_dir, cache_key, result_dict)
+        # Only cache successful traces — errored results (bad model, bad key, etc.)
+        # should not be cached so the user can retry with corrected inputs.
+        has_error = bool(result_dict.get("error"))
+        report_url: str | None = None
+        if not has_error:
+            _write_cache(cache_dir, cache_key, result_dict)
+            from skillscan_trace.r2 import write_report as _r2_write
 
-        from skillscan_trace.r2 import write_report as _r2_write
-
-        report_url: str | None = _r2_write(cache_key, result_dict)
+            report_url = _r2_write(cache_key, result_dict)
 
         job.result = {
             **result_dict,
