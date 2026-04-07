@@ -103,12 +103,16 @@ SOURCES: list[dict[str, Any]] = [
 
 def fetch_signal(source: dict[str, Any]) -> tuple[str, str]:
     """Fetch a source and return (signal_value, raw_content_hash)."""
-    resp = requests.get(source["url"], timeout=15, headers={"User-Agent": "skillscan-trace/domain-updater"})
+    resp = requests.get(
+        source["url"], timeout=15, headers={"User-Agent": "skillscan-trace/domain-updater"}
+    )
     resp.raise_for_status()
 
     content_hash = hashlib.sha256(resp.content).hexdigest()[:16]
 
-    if source["url"].endswith(".json") or "application/json" in resp.headers.get("Content-Type", ""):
+    if source["url"].endswith(".json") or "application/json" in resp.headers.get(
+        "Content-Type", ""
+    ):
         data = resp.json()
         if source["signal_field"] and source["signal_field"] in data:
             return str(data[source["signal_field"]]), content_hash
@@ -146,11 +150,15 @@ def check_sources() -> list[dict[str, Any]]:
             print(f"  [NEW]  {name}: first check, signal={signal[:20]}")
             state[name] = {"signal": signal, "last_checked": datetime.now(UTC).isoformat()}
         elif signal != prev_signal:
-            print(f"  [CHANGED] {name}: {prev_signal[:20]} → {signal[:20]} (last checked: {prev_checked})")
+            print(
+                f"  [CHANGED] {name}: {prev_signal[:20]} → {signal[:20]} (last checked: {prev_checked})"
+            )
             changed.append({**source, "old_signal": prev_signal, "new_signal": signal})
             state[name] = {"signal": signal, "last_checked": datetime.now(UTC).isoformat()}
         else:
-            print(f"  [OK]   {name}: no change (signal={signal[:20]}, last checked: {prev_checked})")
+            print(
+                f"  [OK]   {name}: no change (signal={signal[:20]}, last checked: {prev_checked})"
+            )
             state[name]["last_checked"] = datetime.now(UTC).isoformat()
 
     save_state(state)
@@ -194,7 +202,9 @@ def format_review_notice(changed: list[dict[str, Any]]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="skillscan-trace domain allowlist updater")
-    parser.add_argument("--check", action="store_true", help="Check sources and print diff (no writes)")
+    parser.add_argument(
+        "--check", action="store_true", help="Check sources and print diff (no writes)"
+    )
     parser.add_argument("--apply", action="store_true", help="Check sources and update state file")
     parser.add_argument("--ci", action="store_true", help="CI mode: exit 1 if changes found")
     args = parser.parse_args()

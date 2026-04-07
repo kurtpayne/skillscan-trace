@@ -91,9 +91,9 @@ def _generate_via_llm(
             f"File paths/URLs referenced: {', '.join(tools_and_steps['paths'][:10])}"
         )
     if tools_and_steps["steps"]:
-        skill_summary_parts.append("Steps:\n" + "\n".join(
-            f"- {s}" for s in tools_and_steps["steps"][:8]
-        ))
+        skill_summary_parts.append(
+            "Steps:\n" + "\n".join(f"- {s}" for s in tools_and_steps["steps"][:8])
+        )
 
     # If no metadata, use the first 500 chars of the system prompt as context
     if not skill_summary_parts:
@@ -180,9 +180,7 @@ def _extract_tools_and_steps(content: str) -> dict[str, list[str]]:
 
     # --- File path and URL extraction ---
     # Match absolute/home-relative file paths (e.g. /etc/passwd, ~/.aws/credentials)
-    file_path_re = re.compile(
-        r"(?:^|[\s\"'`(])((?:~|/)[A-Za-z0-9_./-]{3,})", re.MULTILINE
-    )
+    file_path_re = re.compile(r"(?:^|[\s\"'`(])((?:~|/)[A-Za-z0-9_./-]{3,})", re.MULTILINE)
     url_re = re.compile(r"https?://[^\s)\"'`>]+")
 
     seen_paths: set[str] = set()
@@ -200,9 +198,7 @@ def _extract_tools_and_steps(content: str) -> dict[str, list[str]]:
             paths.append(u)
 
     # --- Step extraction ---
-    step_re = re.compile(
-        r"(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)", re.MULTILINE
-    )
+    step_re = re.compile(r"(?:^|\n)\s*(?:\d+[\.\)]\s*|[-*]\s+)(.+)", re.MULTILINE)
     for m in step_re.finditer(content):
         step_text = m.group(1).strip()
         # Skip very short or header-like lines
@@ -246,9 +242,26 @@ def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
         step_lower = step.lower()
         if any(
             kw in step_lower
-            for kw in ("run", "execute", "scan", "search", "find", "check", "read",
-                        "write", "create", "build", "deploy", "install", "test",
-                        "analyze", "review", "fetch", "download", "grep")
+            for kw in (
+                "run",
+                "execute",
+                "scan",
+                "search",
+                "find",
+                "check",
+                "read",
+                "write",
+                "create",
+                "build",
+                "deploy",
+                "install",
+                "test",
+                "analyze",
+                "review",
+                "fetch",
+                "download",
+                "grep",
+            )
         ):
             messages.append(step.rstrip(".") + ".")
 

@@ -189,13 +189,11 @@ def _render_html_report(result: dict[str, Any]) -> str:
                 f'<div class="finding">'
                 f'<span class="rule-id">{esc(sf.get("rule_id", ""))}</span>'
                 f'<span class="severity {esc(sf.get("severity", "")).lower()}">'
-                f'{esc(sf.get("severity", ""))}</span>'
+                f"{esc(sf.get('severity', ''))}</span>"
                 f'<p class="msg">{esc(sf.get("message", ""))}</p>'
                 f"</div>\n"
             )
-        static_section = (
-            f'<section><h2>Static Scan Findings</h2>{static_items}</section>'
-        )
+        static_section = f"<section><h2>Static Scan Findings</h2>{static_items}</section>"
 
     # Lint findings
     lint_section = ""
@@ -209,9 +207,7 @@ def _render_html_report(result: dict[str, Any]) -> str:
                 f'<p class="msg">{esc(lf.get("message", ""))}</p>'
                 f"</div>\n"
             )
-        lint_section = (
-            f'<section><h2>Lint Findings</h2>{lint_items}</section>'
-        )
+        lint_section = f"<section><h2>Lint Findings</h2>{lint_items}</section>"
 
     # JSON link
     json_link = ""
@@ -659,7 +655,9 @@ try:
         allow_commands: list[str] = Field(default_factory=list)
         judge: bool = Field(False, description="Run dual-LLM judge after trace")
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
-        include_scan: bool = Field(False, description="Run static scan (audit profile, no key needed)")
+        include_scan: bool = Field(
+            False, description="Run static scan (audit profile, no key needed)"
+        )
         include_lint: bool = Field(False, description="Run lint quality check (no key needed)")
         skill_files: dict[str, str] | None = Field(
             None,

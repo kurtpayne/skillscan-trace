@@ -685,14 +685,29 @@ def run_detectors(
 
 # Tool names / rule IDs that indicate potential exfiltration when they follow
 # a sensitive file read.
-_EXFIL_TOOL_NAMES = {"http_fetch", "email_send", "gmail_send", "slack_post_message",
-                     "notion_create_page", "notion_append_block",
-                     "github_create_issue", "github_push_file"}
+_EXFIL_TOOL_NAMES = {
+    "http_fetch",
+    "email_send",
+    "gmail_send",
+    "slack_post_message",
+    "notion_create_page",
+    "notion_append_block",
+    "github_create_issue",
+    "github_push_file",
+}
 
-_EXFIL_RULE_IDS = {"EXF-TRACE-001", "EXF-TRACE-002", "EXF-TRACE-004",
-                   "EXF-TRACE-005", "EXF-TRACE-006", "EXF-TRACE-007",
-                   "EXF-TRACE-008", "EXF-TRACE-009", "NET-TRACE-001",
-                   "NET-TRACE-002"}
+_EXFIL_RULE_IDS = {
+    "EXF-TRACE-001",
+    "EXF-TRACE-002",
+    "EXF-TRACE-004",
+    "EXF-TRACE-005",
+    "EXF-TRACE-006",
+    "EXF-TRACE-007",
+    "EXF-TRACE-008",
+    "EXF-TRACE-009",
+    "NET-TRACE-001",
+    "NET-TRACE-002",
+}
 
 
 def post_process_findings(events: list[Any], findings: list[Any]) -> None:
@@ -738,10 +753,7 @@ def post_process_findings(events: list[Any], findings: list[Any]) -> None:
             read_turn = f.event.turn if f.event else -1
             if any(et >= read_turn for et in exfil_turns):
                 f.severity = Severity.HIGH
-                f.message = (
-                    "Sensitive file read followed by potential exfiltration"
-                    f" — {f.evidence}"
-                )
+                f.message = f"Sensitive file read followed by potential exfiltration — {f.evidence}"
 
 
 # ---------------------------------------------------------------------------
