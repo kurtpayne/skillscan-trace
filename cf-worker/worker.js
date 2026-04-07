@@ -5,7 +5,9 @@
  *   POST /v1/submit          — rate-limit, R2 cache check, proxy to Fly
  *   GET  /v1/status/:job_id  — proxy status poll to Fly
  *   GET  /v1/health          — proxy to Fly
- *   GET  /report/:cache_key  — serve report JSON from R2
+ *   GET  /report/:cache_key       — serve report JSON from R2
+ *   GET  /report/:cache_key.html  — serve self-contained HTML report
+ *   GET  /report/:cache_key.json  — serve report JSON from R2
  *
  * Bindings (wrangler.toml):
  *   env.TRACE_REPORTS  — R2 bucket
@@ -233,24 +235,223 @@ async function handleReportGet(request, env, cacheKey) {
 }
 
 async function handleReportHtml(request, env, cacheKey) {
-  const origin = request.headers.get("Origin") || "";
-
-  try {
-    const obj = await env.TRACE_REPORTS.get(`reports/${cacheKey}.html`);
-    if (!obj) {
-      return json({ error: "HTML report not found or expired" }, 404, origin);
-    }
-    const html = await obj.text();
-    return new Response(html, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        ...corsHeaders(origin),
-      },
-    });
-  } catch {
-    return json({ error: "Failed to retrieve HTML report" }, 500, origin);
+  const report = await r2CacheGet(env, cacheKey);
+  if (!report) {
+    return new Response(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title></head>` +
+      `<body style="background:oklch(0.16 0.02 260);color:#e2e8f0;font-family:system-ui;display:flex;` +
+      `align-items:center;justify-content:center;min-height:100vh;margin:0;">` +
+      `<h1>Report not found or expired</h1></body></html>`,
+      { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
   }
+
+  const esc = (s) =>
+    String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const r = report;
+  const verdict = (r.verdict || "UNKNOWN").toUpperCase();
+  const skillName = r.skill_name || r.skill_file || "Unknown Skill";
+  const model = r.model || "unknown";
+  const duration =
+    r.duration_seconds != null ? r.duration_seconds.toFixed(1) + "s" : "n/a";
+  const toolCalls = Array.isArray(r.tool_calls) ? r.tool_calls : [];
+  const findings = Array.isArray(r.findings) ? r.findings : [];
+  const events = Array.isArray(r.events) ? r.events : [];
+  const userMessages = Array.isArray(r.user_messages) ? r.user_messages : [];
+  const provenance = r.provenance || {};
+
+  const verdictColors = {
+    PASS: "#22c55e",
+    BLOCK: "#ef4444",
+    WARN: "#eab308",
+    ERROR: "#f97316",
+  };
+  const vc = verdictColors[verdict] || "#94a3b8";
+
+  // ── Findings section ─────────────────────────────────────────────────────
+  const findingsHtml =
+    findings.length === 0
+      ? `<p class="muted">No findings.</p>`
+      : findings
+          .map((f) => {
+            const sev = (f.severity || "info").toLowerCase();
+            const isHigh = sev === "critical" || sev === "high";
+            const isMed = sev === "medium";
+            const borderColor = isHigh ? "#ef4444" : isMed ? "#eab308" : "#475569";
+            const badgeBg = isHigh ? "#7f1d1d" : isMed ? "#713f12" : "#334155";
+            const badgeFg = isHigh ? "#fca5a5" : isMed ? "#fde68a" : "#cbd5e1";
+            return `<div class="card" style="border-left:4px solid ${borderColor}">
+              <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">
+                <span style="background:${badgeBg};color:${badgeFg};padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;text-transform:uppercase">${esc(sev)}</span>
+                <code style="color:#93c5fd;font-size:13px">${esc(f.rule_id)}</code>
+              </div>
+              <p style="margin:0 0 6px">${esc(f.message)}</p>
+              ${f.evidence ? `<pre class="pre-block" style="color:#a5b4fc">${esc(f.evidence)}</pre>` : ""}
+            </div>`;
+          })
+          .join("");
+
+  // ── Events timeline ──────────────────────────────────────────────────────
+  const eventsHtml =
+    events.length === 0
+      ? `<p class="muted">No events recorded.</p>`
+      : events
+          .map((ev) => {
+            const label = ev.tool || ev.type || ev.event || "event";
+            const argStr =
+              ev.arguments != null
+                ? typeof ev.arguments === "string"
+                  ? ev.arguments
+                  : JSON.stringify(ev.arguments, null, 2)
+                : null;
+            const resStr =
+              ev.result != null
+                ? typeof ev.result === "string"
+                  ? ev.result
+                  : JSON.stringify(ev.result, null, 2)
+                : null;
+            return `<div class="card" style="padding:12px 16px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="color:#93c5fd;font-weight:600;font-size:14px">${esc(label)}</span>
+                ${ev.timestamp ? `<span style="color:#64748b;font-size:12px">${esc(ev.timestamp)}</span>` : ""}
+              </div>
+              ${argStr != null ? `<pre class="pre-block">${esc(argStr)}</pre>` : ""}
+              ${resStr != null ? `<pre class="pre-block" style="color:#86efac">${esc(resStr)}</pre>` : ""}
+            </div>`;
+          })
+          .join("");
+
+  // ── User messages ────────────────────────────────────────────────────────
+  const userMsgHtml =
+    userMessages.length === 0
+      ? ""
+      : `<section>
+          <h2>User Messages</h2>
+          ${userMessages
+            .map((m) => {
+              const text = typeof m === "string" ? m : m.content || JSON.stringify(m);
+              return `<div class="card" style="padding:12px 16px">
+                <p style="margin:0;white-space:pre-wrap">${esc(text)}</p>
+              </div>`;
+            })
+            .join("")}
+        </section>`;
+
+  // ── Provenance ───────────────────────────────────────────────────────────
+  const provKeys = Object.keys(provenance);
+  const provenanceHtml =
+    provKeys.length === 0
+      ? ""
+      : `<section>
+          <h2>Provenance</h2>
+          <div class="card" style="padding:16px">
+            <dl style="margin:0;display:grid;grid-template-columns:max-content 1fr;gap:6px 16px">
+              ${provKeys
+                .map(
+                  (k) =>
+                    `<dt style="color:#94a3b8;font-size:13px;font-weight:600">${esc(k)}</dt>` +
+                    `<dd style="margin:0;color:#cbd5e1;font-size:13px;word-break:break-all">${esc(
+                      typeof provenance[k] === "string" ? provenance[k] : JSON.stringify(provenance[k])
+                    )}</dd>`
+                )
+                .join("")}
+            </dl>
+          </div>
+        </section>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trace Report \u2014 ${esc(skillName)}</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:oklch(0.16 0.02 260);color:#e2e8f0;line-height:1.6}
+a{color:#93c5fd;text-decoration:none}
+a:hover{text-decoration:underline}
+pre,code{font-family:"SF Mono","Fira Code","Fira Mono",Menlo,Consolas,monospace}
+h2{color:#e2e8f0;font-size:18px;margin:32px 0 12px}
+.wrap{max-width:860px;margin:0 auto;padding:24px 16px 64px}
+.muted{color:#94a3b8}
+.card{background:oklch(0.22 0.02 260);border-radius:8px;padding:16px;margin-bottom:10px}
+.pre-block{margin:4px 0 0;padding:10px;background:oklch(0.18 0.02 260);border-radius:4px;overflow-x:auto;color:#cbd5e1;font-size:12px}
+.badge{display:inline-block;padding:6px 20px;border-radius:9999px;font-size:16px;font-weight:700}
+.stat-label{color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:0.05em}
+.stat-value{color:#cbd5e1;font-size:14px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;flex-wrap:wrap;gap:12px}
+.header-links{display:flex;gap:12px}
+.header-links a{padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600}
+.summary{background:oklch(0.20 0.02 260);border-radius:12px;padding:24px;margin-bottom:24px}
+.stats{display:flex;flex-wrap:wrap;gap:24px;margin-top:16px}
+footer{margin-top:48px;padding-top:24px;border-top:1px solid oklch(0.25 0.02 260);text-align:center}
+footer p{color:#475569;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="header">
+    <div>
+      <h1 style="margin:0;font-size:24px;color:#f1f5f9">SkillScan Trace Report</h1>
+      <p style="margin:4px 0 0;color:#64748b;font-size:14px">Behavioral execution trace</p>
+    </div>
+    <div class="header-links">
+      <a href="/report/${esc(cacheKey)}.json" style="background:oklch(0.25 0.02 260);color:#93c5fd">View JSON</a>
+      <a href="https://skillscan.sh/trace/run" style="background:oklch(0.30 0.06 260);color:#c4b5fd">Run on SkillScan</a>
+    </div>
+  </header>
+
+  <section class="summary">
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+      <span class="badge" style="background:${vc}22;color:${vc};border:2px solid ${vc}">${verdict}</span>
+      <h2 style="margin:0;font-size:20px;color:#f1f5f9">${esc(skillName)}</h2>
+    </div>
+    <div class="stats">
+      <div><span class="stat-label">Model</span><br><span class="stat-value">${esc(model)}</span></div>
+      <div><span class="stat-label">Duration</span><br><span class="stat-value">${esc(duration)}</span></div>
+      <div><span class="stat-label">Tool Calls</span><br><span class="stat-value">${toolCalls.length}</span></div>
+      <div><span class="stat-label">Findings</span><br><span class="stat-value">${findings.length}</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Findings</h2>
+    ${findingsHtml}
+  </section>
+
+  <section>
+    <h2>Event Timeline</h2>
+    ${eventsHtml}
+  </section>
+
+  ${userMsgHtml}
+  ${provenanceHtml}
+
+  <footer>
+    <p>Generated by <a href="https://skillscan.sh">SkillScan Trace</a></p>
+  </footer>
+
+</div>
+<script>
+// Embed raw report JSON for client-side use
+window.__TRACE_REPORT__ = ${JSON.stringify(report).replace(/</g, "\\u003c")};
+</script>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
 }
 
 async function handleHealth(env) {
