@@ -110,6 +110,32 @@ def write_report(cache_key: str, result: dict[str, Any]) -> str | None:
         return None
 
 
+def write_html_report(cache_key: str, html: str) -> str | None:
+    """
+    Write a rendered HTML report to R2. Returns the public HTML URL, or None
+    if R2 is not configured or the write fails.
+    """
+    client = _client()
+    if client is None:
+        return None
+
+    bucket = _bucket()
+    html_url = f"{_REPORT_BASE_URL}/report/{cache_key}.html"
+
+    try:
+        client.put_object(
+            Bucket=bucket,
+            Key=f"reports/{cache_key}.html",
+            Body=html.encode(),
+            ContentType="text/html",
+        )
+        logger.info("HTML report written to R2: %s", html_url)
+        return html_url
+    except Exception as e:
+        logger.warning("R2 HTML write failed (non-fatal): %s", e)
+        return None
+
+
 def read_report(cache_key: str) -> dict[str, Any] | None:
     """
     Fetch a report from R2 by cache key. Returns None if not found or

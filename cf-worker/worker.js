@@ -232,6 +232,27 @@ async function handleReportGet(request, env, cacheKey) {
   return json(report, 200, origin);
 }
 
+async function handleReportHtml(request, env, cacheKey) {
+  const origin = request.headers.get("Origin") || "";
+
+  try {
+    const obj = await env.TRACE_REPORTS.get(`reports/${cacheKey}.html`);
+    if (!obj) {
+      return json({ error: "HTML report not found or expired" }, 404, origin);
+    }
+    const html = await obj.text();
+    return new Response(html, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        ...corsHeaders(origin),
+      },
+    });
+  } catch {
+    return json({ error: "Failed to retrieve HTML report" }, 500, origin);
+  }
+}
+
 async function handleHealth(env) {
   try {
     const resp = await fetch(`${env.FLY_APP_URL}/v1/health`, {
@@ -274,6 +295,11 @@ export default {
 
     if (method === "GET" && pathname.startsWith("/report/")) {
       let cacheKey = pathname.slice("/report/".length);
+      // Serve HTML permalink
+      if (cacheKey.endsWith(".html")) {
+        cacheKey = cacheKey.slice(0, -5);
+        return handleReportHtml(request, env, cacheKey);
+      }
       // Support /report/{key}.json — strip .json extension
       if (cacheKey.endsWith(".json")) {
         cacheKey = cacheKey.slice(0, -5);

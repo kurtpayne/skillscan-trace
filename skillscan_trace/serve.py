@@ -106,6 +106,235 @@ def _write_cache(cache_dir: Path, key: str, result: dict[str, Any]) -> None:
 # ── Integrated scan + lint ─────────────────────────────────────────────────────
 
 
+def _render_html_report(result: dict[str, Any]) -> str:
+    """Render a self-contained HTML page from a trace report dict."""
+    import html as html_mod
+
+    def esc(val: object) -> str:
+        return html_mod.escape(str(val)) if val is not None else ""
+
+    skill_name = esc(result.get("skill_name") or result.get("skill_path", "unknown"))
+    model = esc(result.get("model", ""))
+    verdict = result.get("verdict") or result.get("judge_verdict") or "none"
+    verdict_esc = esc(verdict)
+    report_url = esc(result.get("report_url", ""))
+
+    # Verdict badge colors (oklch palette)
+    verdict_lower = verdict.lower()
+    if "malicious" in verdict_lower or "block" in verdict_lower:
+        badge_bg = "oklch(0.45 0.22 25)"
+        badge_fg = "oklch(0.95 0.03 25)"
+    elif "benign" in verdict_lower or "pass" in verdict_lower:
+        badge_bg = "oklch(0.45 0.18 155)"
+        badge_fg = "oklch(0.95 0.03 155)"
+    else:
+        badge_bg = "oklch(0.40 0.12 60)"
+        badge_fg = "oklch(0.95 0.03 60)"
+
+    # Stats
+    total_calls = result.get("total_tool_calls", 0)
+    total_findings = len(result.get("findings", []))
+    duration = result.get("duration_seconds") or result.get("elapsed_seconds", "")
+    started = result.get("started_at", "")
+    finished = result.get("finished_at", "")
+
+    # Findings list
+    findings_html = ""
+    for f in result.get("findings", []):
+        rule_id = esc(f.get("rule_id", ""))
+        sev = esc(f.get("severity", ""))
+        msg = esc(f.get("message", ""))
+        source = esc(f.get("source", ""))
+        source_tag = f' <span class="tag">{source}</span>' if source else ""
+        findings_html += (
+            f'<div class="finding">'
+            f'<span class="rule-id">{rule_id}</span>'
+            f'<span class="severity {sev.lower()}">{sev}</span>'
+            f"{source_tag}"
+            f'<p class="msg">{msg}</p>'
+            f"</div>\n"
+        )
+    if not findings_html:
+        findings_html = '<p class="muted">No findings.</p>'
+
+    # Event timeline
+    events_html = ""
+    for ev in result.get("events", []):
+        turn = esc(ev.get("turn", ""))
+        tool = esc(ev.get("tool", ""))
+        args_raw = ev.get("arguments", {})
+        args_str = esc(json.dumps(args_raw, ensure_ascii=False)[:300]) if args_raw else ""
+        events_html += (
+            f'<tr><td>{turn}</td><td class="tool-name">{tool}</td>'
+            f"<td><code>{args_str}</code></td></tr>\n"
+        )
+    if not events_html:
+        events_html = '<tr><td colspan="3" class="muted">No events recorded.</td></tr>'
+
+    # Provenance
+    prov = result.get("provenance", {})
+    prov_html = ""
+    for k, v in prov.items():
+        prov_html += f"<tr><td>{esc(k)}</td><td>{esc(v)}</td></tr>\n"
+    if not prov_html:
+        prov_html = '<tr><td colspan="2" class="muted">No provenance data.</td></tr>'
+
+    # Static findings
+    static_section = ""
+    static_findings = result.get("static_findings", [])
+    if static_findings:
+        static_items = ""
+        for sf in static_findings:
+            static_items += (
+                f'<div class="finding">'
+                f'<span class="rule-id">{esc(sf.get("rule_id", ""))}</span>'
+                f'<span class="severity {esc(sf.get("severity", "")).lower()}">'
+                f'{esc(sf.get("severity", ""))}</span>'
+                f'<p class="msg">{esc(sf.get("message", ""))}</p>'
+                f"</div>\n"
+            )
+        static_section = (
+            f'<section><h2>Static Scan Findings</h2>{static_items}</section>'
+        )
+
+    # Lint findings
+    lint_section = ""
+    lint_findings = result.get("lint_findings", [])
+    if lint_findings:
+        lint_items = ""
+        for lf in lint_findings:
+            lint_items += (
+                f'<div class="finding">'
+                f'<span class="rule-id">{esc(lf.get("rule_id", ""))}</span>'
+                f'<p class="msg">{esc(lf.get("message", ""))}</p>'
+                f"</div>\n"
+            )
+        lint_section = (
+            f'<section><h2>Lint Findings</h2>{lint_items}</section>'
+        )
+
+    # JSON link
+    json_link = ""
+    if report_url:
+        json_url = report_url if report_url.endswith(".json") else report_url + ".json"
+        json_link = f'<a href="{esc(json_url)}" class="json-link">View JSON report</a>'
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkillScan Trace Report — {skill_name}</title>
+<style>
+*,*::before,*::after{{box-sizing:border-box}}
+body{{
+  margin:0;padding:2rem;
+  background:oklch(0.07 0.018 265);
+  color:oklch(0.85 0.02 265);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  line-height:1.6;
+}}
+h1,h2{{color:oklch(0.78 0.18 290);margin-top:2rem}}
+h1{{font-size:1.5rem;margin-top:0}}
+h2{{font-size:1.15rem;border-bottom:1px solid oklch(0.25 0.02 265);padding-bottom:0.3rem}}
+a{{color:oklch(0.78 0.18 290)}}
+.container{{max-width:900px;margin:0 auto}}
+.header{{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}}
+.badge{{
+  display:inline-block;padding:0.25rem 0.75rem;border-radius:4px;
+  font-weight:700;font-size:0.9rem;text-transform:uppercase;
+  background:{badge_bg};color:{badge_fg};
+}}
+.stats{{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+  gap:0.75rem;margin:1rem 0;
+}}
+.stat{{
+  background:oklch(0.12 0.015 265);border-radius:6px;padding:0.75rem 1rem;
+}}
+.stat .label{{font-size:0.75rem;text-transform:uppercase;color:oklch(0.55 0.02 265)}}
+.stat .value{{font-size:1.1rem;font-weight:600}}
+.finding{{
+  background:oklch(0.12 0.015 265);border-radius:6px;
+  padding:0.75rem 1rem;margin:0.5rem 0;
+}}
+.rule-id{{font-weight:700;margin-right:0.5rem;color:oklch(0.78 0.18 290)}}
+.severity{{
+  font-size:0.75rem;text-transform:uppercase;font-weight:600;
+  padding:0.1rem 0.4rem;border-radius:3px;
+}}
+.severity.high,.severity.critical{{background:oklch(0.40 0.18 25);color:oklch(0.95 0.03 25)}}
+.severity.medium{{background:oklch(0.40 0.14 60);color:oklch(0.95 0.03 60)}}
+.severity.low,.severity.info{{background:oklch(0.35 0.10 265);color:oklch(0.85 0.02 265)}}
+.tag{{font-size:0.7rem;background:oklch(0.25 0.04 265);padding:0.1rem 0.4rem;border-radius:3px}}
+.msg{{margin:0.3rem 0 0;font-size:0.9rem}}
+table{{width:100%;border-collapse:collapse;margin:0.5rem 0;font-size:0.85rem}}
+th{{text-align:left;color:oklch(0.55 0.02 265);font-weight:600;
+    border-bottom:1px solid oklch(0.25 0.02 265);padding:0.4rem 0.5rem}}
+td{{padding:0.4rem 0.5rem;border-bottom:1px solid oklch(0.15 0.01 265)}}
+code{{
+  font-family:"SF Mono",Monaco,Consolas,monospace;font-size:0.8rem;
+  word-break:break-all;color:oklch(0.75 0.06 200);
+}}
+.tool-name{{font-weight:600;color:oklch(0.78 0.18 290)}}
+.muted{{color:oklch(0.45 0.02 265);font-style:italic}}
+.json-link{{
+  display:inline-block;margin-top:1.5rem;padding:0.4rem 1rem;
+  border:1px solid oklch(0.78 0.18 290);border-radius:4px;
+  text-decoration:none;font-size:0.85rem;
+}}
+.json-link:hover{{background:oklch(0.15 0.03 290)}}
+.footer{{margin-top:2rem;font-size:0.75rem;color:oklch(0.40 0.02 265)}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>SkillScan Trace Report</h1>
+    <span class="badge">{verdict_esc}</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="label">Skill</div><div class="value">{skill_name}</div></div>
+    <div class="stat"><div class="label">Model</div><div class="value">{model}</div></div>
+    <div class="stat"><div class="label">Tool Calls</div><div class="value">{total_calls}</div></div>
+    <div class="stat"><div class="label">Findings</div><div class="value">{total_findings}</div></div>
+    <div class="stat"><div class="label">Duration</div><div class="value">{esc(duration)}</div></div>
+    <div class="stat"><div class="label">Started</div><div class="value">{esc(started)}</div></div>
+    <div class="stat"><div class="label">Finished</div><div class="value">{esc(finished)}</div></div>
+  </div>
+
+  <section>
+    <h2>Behavioral Findings</h2>
+    {findings_html}
+  </section>
+
+  {static_section}
+  {lint_section}
+
+  <section>
+    <h2>Event Timeline</h2>
+    <table>
+      <thead><tr><th>Turn</th><th>Tool</th><th>Arguments</th></tr></thead>
+      <tbody>{events_html}</tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Provenance</h2>
+    <table>
+      <thead><tr><th>Key</th><th>Value</th></tr></thead>
+      <tbody>{prov_html}</tbody>
+    </table>
+  </section>
+
+  {json_link}
+  <div class="footer">Generated by skillscan-trace</div>
+</div>
+</body>
+</html>"""
+
+
 def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
     """Run skillscan static scan in audit profile. Returns findings as dicts."""
     try:
@@ -266,8 +495,10 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         if not has_error:
             _write_cache(cache_dir, cache_key, result_dict)
             from skillscan_trace.r2 import write_report as _r2_write
+            from skillscan_trace.r2 import write_html_report as _r2_write_html
 
             report_url = _r2_write(cache_key, result_dict)
+            _r2_write_html(cache_key, _render_html_report(result_dict))
 
         job.result = {
             **result_dict,
