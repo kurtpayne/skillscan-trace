@@ -527,6 +527,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         # Author declarations
         allow_domains: list[str] = list(params.get("allow_domains") or [])
         allow_commands: list[str] = list(params.get("allow_commands") or [])
+        user_messages: list[str] | None = params.get("user_messages") or None
 
         try:
             report = run_trace(
@@ -536,6 +537,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 base_url=resolved_base_url,
                 max_turns=max_turns,
                 allowed_domains=set(allow_domains) if allow_domains else None,
+                user_messages=user_messages,
             )
             result_dict = json.loads(format_json(report))
 
@@ -665,6 +667,13 @@ try:
                 "Dict of filename->content for multi-file skills. "
                 "When provided, files are written to a temp directory and "
                 "processed as a skill directory (enables skill graph analysis)."
+            ),
+        )
+        user_messages: list[str] | None = Field(
+            None,
+            description=(
+                "Manual user messages to send to the model instead of LLM-generated "
+                "fuzz inputs. Maximum 10 messages, one per entry."
             ),
         )
 
