@@ -122,8 +122,19 @@ async function handleSubmit(request, env) {
     return json({ error: "Invalid JSON body" }, 400, origin);
   }
 
+  const MAX_SKILL_SIZE = 524288; // 512KB
+
   let skillContent = (body.skill_content || "").trim();
   const model = body.model || "gpt-4.1-mini";
+
+  // Size check on inline skill_content
+  if (skillContent && new TextEncoder().encode(skillContent).length > MAX_SKILL_SIZE) {
+    return json(
+      { error: `skill_content exceeds maximum size of 512KB (${MAX_SKILL_SIZE} bytes).` },
+      413,
+      origin
+    );
+  }
 
   // If skill_content is empty but source_url is provided, fetch it server-side
   // (browsers can't fetch raw.githubusercontent.com due to CORS)
@@ -141,6 +152,16 @@ async function handleSubmit(request, env) {
         );
       }
       skillContent = (await srcResp.text()).trim();
+
+      // Size check on fetched content
+      if (new TextEncoder().encode(skillContent).length > MAX_SKILL_SIZE) {
+        return json(
+          { error: `Content at source_url exceeds maximum size of 512KB (${MAX_SKILL_SIZE} bytes).` },
+          413,
+          origin
+        );
+      }
+
       body.skill_content = skillContent;
     } catch (e) {
       return json({ error: `Could not fetch source_url: ${e.message}` }, 422, origin);
@@ -252,7 +273,11 @@ export default {
     }
 
     if (method === "GET" && pathname.startsWith("/report/")) {
-      const cacheKey = pathname.slice("/report/".length);
+      let cacheKey = pathname.slice("/report/".length);
+      // Support /report/{key}.json — strip .json extension
+      if (cacheKey.endsWith(".json")) {
+        cacheKey = cacheKey.slice(0, -5);
+      }
       return handleReportGet(request, env, cacheKey);
     }
 

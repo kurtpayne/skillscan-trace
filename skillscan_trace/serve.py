@@ -215,6 +215,10 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             f.write(skill_content)
             skill_path = f.name
 
+        # Author declarations
+        allow_domains: list[str] = list(params.get("allow_domains") or [])
+        allow_commands: list[str] = list(params.get("allow_commands") or [])
+
         try:
             report = run_trace(
                 skill_path,
@@ -222,8 +226,15 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 api_key=api_key,
                 base_url=resolved_base_url,
                 max_turns=max_turns,
+                allowed_domains=set(allow_domains) if allow_domains else None,
             )
             result_dict = json.loads(format_json(report))
+
+            # Include author declarations in the result
+            if allow_domains:
+                result_dict["allow_domains"] = allow_domains
+            if allow_commands:
+                result_dict["allow_commands"] = allow_commands
 
             # Run static scan + lint if requested (no API key needed)
             run_scan = bool(params.get("include_scan", False))
@@ -235,6 +246,18 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 result_dict["lint_findings"] = _run_lint(skill_path)
         finally:
             Path(skill_path).unlink(missing_ok=True)
+
+        # Add provenance metadata
+        result_dict["provenance"] = {
+            "server_version": "0.2.0",
+            "trace_engine": "skillscan-trace",
+            "fly_region": os.environ.get("FLY_REGION", "unknown"),
+            "fly_machine_id": os.environ.get("FLY_MACHINE_ID", "unknown"),
+            "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "report_sha256": hashlib.sha256(
+                json.dumps(result_dict, sort_keys=True).encode()
+            ).hexdigest(),
+        }
 
         # Only cache successful traces — errored results (bad model, bad key, etc.)
         # should not be cached so the user can retry with corrected inputs.
@@ -313,6 +336,7 @@ try:
         variants: int = Field(3, ge=1, le=10, description="Number of user messages to generate")
         max_turns: int = Field(10, ge=1, le=20, description="Max tool-call rounds per message")
         allow_domains: list[str] = Field(default_factory=list)
+        allow_commands: list[str] = Field(default_factory=list)
         judge: bool = Field(False, description="Run dual-LLM judge after trace")
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
         include_scan: bool = Field(False, description="Run static scan (audit profile, no key needed)")
