@@ -285,6 +285,10 @@ def create_app(
         variants: int = Field(3, ge=1, le=10, description="Number of user messages to generate")
         max_turns: int = Field(10, ge=1, le=20, description="Max tool-call rounds per message")
         allow_domains: list[str] = Field(default_factory=list)
+        judge: bool = Field(False, description="Run dual-LLM judge after trace")
+        judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
+
+        model_config = {"extra": "ignore"}
 
     @app.get("/v1/health")
     async def health() -> dict[str, str]:
