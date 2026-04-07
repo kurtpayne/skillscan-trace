@@ -150,7 +150,7 @@ def read_report(cache_key: str) -> dict[str, Any] | None:
         resp = client.get_object(Bucket=bucket, Key=f"reports/{cache_key}.json")
         data: dict[str, Any] = json.loads(resp["Body"].read())
         return data
-    except client.exceptions.NoSuchKey:  # type: ignore[union-attr]
+    except client.exceptions.NoSuchKey:
         return None
     except Exception as e:
         logger.warning("R2 read failed (non-fatal): %s", e)

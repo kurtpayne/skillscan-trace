@@ -122,7 +122,8 @@ def fetch_signal(source: dict[str, Any]) -> tuple[str, str]:
 
 def load_state() -> dict[str, Any]:
     if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text())
+        result: dict[str, Any] = json.loads(STATE_FILE.read_text())
+        return result
     return {}
 
 

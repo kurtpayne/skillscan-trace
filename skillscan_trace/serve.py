@@ -353,7 +353,7 @@ def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
         # Tag each finding with source
         for f in findings:
             f["source"] = "static"
-        return findings
+        return list(findings)
     except FileNotFoundError:
         logger.debug("skillscan not installed — skipping static scan")
         return []
@@ -380,7 +380,7 @@ def _run_lint(skill_path: str) -> list[dict[str, Any]]:
         findings = data if isinstance(data, list) else data.get("findings", [])
         for f in findings:
             f["source"] = "lint"
-        return findings
+        return list(findings)
     except FileNotFoundError:
         logger.debug("skillscan-lint not installed — skipping lint")
         return []
@@ -490,7 +490,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         if zip_temp_dir:
             # ZIP mode: files already extracted to zip_temp_dir
             temp_dir = zip_temp_dir
-            skill_path = str(main_file)  # type: ignore[possibly-undefined]
+            skill_path = str(main_file)
             scan_target = zip_temp_dir
         elif skill_files and isinstance(skill_files, dict) and len(skill_files) > 1:
             # Multi-file mode: write all files to a temp directory
@@ -575,7 +575,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         # Only cache successful traces — errored results (bad model, bad key, etc.)
         # should not be cached so the user can retry with corrected inputs.
         has_error = bool(result_dict.get("error"))
-        report_url: str | None = None
+        report_url = None
         if not has_error:
             _write_cache(cache_dir, cache_key, result_dict)
             from skillscan_trace.r2 import write_report as _r2_write
