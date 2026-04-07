@@ -38,6 +38,10 @@ from skillscan_trace.canary.tools_p0_batch2 import (
     DEFINITIONS as _BATCH2_DEFINITIONS,
     GENERATORS as _BATCH2_GENERATORS,
 )
+from skillscan_trace.canary.tools_p1 import (
+    DEFINITIONS as _P1_DEFINITIONS,
+    GENERATORS as _P1_GENERATORS,
+)
 from skillscan_trace.models import Finding, TraceEvent
 
 logger = logging.getLogger("skillscan_trace.canary")
@@ -786,6 +790,17 @@ SYNTHETIC_RESPONSE_GENERATORS = {
 # Merge P0 Batch 2 generators (cloud CLI, code exec, agent memory, web)
 SYNTHETIC_RESPONSE_GENERATORS.update(_BATCH2_GENERATORS)
 
+# Merge P1 generators (browser automation, slack read, advanced filesystem)
+SYNTHETIC_RESPONSE_GENERATORS.update(_P1_GENERATORS)
+
+# Merge P1 Batch 2 generators (git, notion read, google drive)
+from skillscan_trace.canary.tools_p1_batch2 import (
+    GENERATORS as _P1B2_GENERATORS,
+    DEFINITIONS as _P1B2_DEFINITIONS,
+)
+
+SYNTHETIC_RESPONSE_GENERATORS.update(_P1B2_GENERATORS)
+
 
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI tool-call format)
@@ -1494,6 +1509,12 @@ TOOL_DEFINITIONS = [
 # Merge P0 Batch 2 tool definitions (cloud CLI, code exec, agent memory, web)
 TOOL_DEFINITIONS.extend(_BATCH2_DEFINITIONS)
 
+# Merge P1 tool definitions (browser automation, slack read, advanced filesystem)
+TOOL_DEFINITIONS.extend(_P1_DEFINITIONS)
+
+# Merge P1 Batch 2 tool definitions (git, notion read, google drive)
+TOOL_DEFINITIONS.extend(_P1B2_DEFINITIONS)
+
 
 # ---------------------------------------------------------------------------
 # Trace log (shared between server and harness)
@@ -2062,6 +2083,94 @@ async def run_mcp_server(
             "get_secret_scanning_alert",
             {"repo": repo, "alert_number": alert_number},
         )
+
+    # ------------------------------------------------------------------
+    # Browser Automation (P1)
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def browser_navigate(url: str) -> str:
+        """Navigate the browser to a URL and return page information."""
+        return canary.handle_tool_call("browser_navigate", {"url": url})
+
+    @mcp_server.tool()
+    def browser_screenshot(selector: str | None = None) -> str:
+        """Take a screenshot of the current browser page or a specific element."""
+        return canary.handle_tool_call("browser_screenshot", {"selector": selector})
+
+    @mcp_server.tool()
+    def browser_click(selector: str) -> str:
+        """Click an element on the page identified by a CSS selector."""
+        return canary.handle_tool_call("browser_click", {"selector": selector})
+
+    @mcp_server.tool()
+    def browser_fill(selector: str, value: str) -> str:
+        """Fill a form field with a value."""
+        return canary.handle_tool_call("browser_fill", {"selector": selector, "value": value})
+
+    @mcp_server.tool()
+    def browser_evaluate(script: str) -> str:
+        """Evaluate a JavaScript expression in the browser and return the result."""
+        return canary.handle_tool_call("browser_evaluate", {"script": script})
+
+    # ------------------------------------------------------------------
+    # Slack Read (P1)
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def slack_search_messages(query: str, max_results: int = 10) -> str:
+        """Search Slack messages matching a query."""
+        return canary.handle_tool_call(
+            "slack_search_messages", {"query": query, "max_results": max_results}
+        )
+
+    @mcp_server.tool()
+    def slack_read_channel(channel: str, limit: int = 20) -> str:
+        """Read recent messages from a Slack channel."""
+        return canary.handle_tool_call("slack_read_channel", {"channel": channel, "limit": limit})
+
+    @mcp_server.tool()
+    def slack_read_thread(channel: str, thread_ts: str) -> str:
+        """Read messages in a Slack thread."""
+        return canary.handle_tool_call(
+            "slack_read_thread", {"channel": channel, "thread_ts": thread_ts}
+        )
+
+    @mcp_server.tool()
+    def slack_list_channels(limit: int = 100) -> str:
+        """List available Slack channels."""
+        return canary.handle_tool_call("slack_list_channels", {"limit": limit})
+
+    # ------------------------------------------------------------------
+    # Advanced Filesystem (P1)
+    # ------------------------------------------------------------------
+
+    @mcp_server.tool()
+    def search_files(pattern: str, path: str | None = None) -> str:
+        """Search for files matching a pattern."""
+        return canary.handle_tool_call("search_files", {"pattern": pattern, "path": path})
+
+    @mcp_server.tool()
+    def edit_file(path: str, old_text: str, new_text: str) -> str:
+        """Edit a file by replacing occurrences of old_text with new_text."""
+        return canary.handle_tool_call(
+            "edit_file", {"path": path, "old_text": old_text, "new_text": new_text}
+        )
+
+    @mcp_server.tool()
+    def move_file(source: str, destination: str) -> str:
+        """Move or rename a file."""
+        return canary.handle_tool_call("move_file", {"source": source, "destination": destination})
+
+    @mcp_server.tool()
+    def directory_tree(path: str | None = None, depth: int | None = None) -> str:
+        """Show the directory tree structure."""
+        return canary.handle_tool_call("directory_tree", {"path": path, "depth": depth})
+
+    @mcp_server.tool()
+    def read_multiple_files(paths: list[str]) -> str:
+        """Read the contents of multiple files at once."""
+        return canary.handle_tool_call("read_multiple_files", {"paths": paths})
 
     await mcp_server.run_stdio_async()
 
