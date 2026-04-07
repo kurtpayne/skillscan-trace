@@ -402,16 +402,65 @@ def _run_job(job: Job, cache_dir: Path) -> None:
     params = job.params
 
     try:
+        import base64
+        import shutil
         import tempfile
+        import zipfile
         from skillscan_trace.harness import run_trace
         from skillscan_trace.formatters import format_json
 
-        skill_content: str = str(params["skill_content"])
+        skill_content: str = str(params.get("skill_content") or "")
         model: str = str(params.get("model", "gpt-4.1-mini"))
         provider: str = str(params.get("provider", "openai"))
         api_key: str | None = params.get("api_key")
         base_url: str | None = params.get("base_url")
         max_turns: int = int(params.get("max_turns", 10))
+
+        # ── ZIP extraction ──────────────────────────────────────────────────
+        zip_temp_dir: str | None = None
+        if params.get("skill_zip_b64"):
+            import io
+
+            _ALLOWED_ZIP_EXTS = {".md", ".txt", ".yaml", ".yml", ".json"}
+            _MAX_ZIP_FILES = 50
+
+            zip_bytes = base64.b64decode(params["skill_zip_b64"])
+            zip_temp_dir = tempfile.mkdtemp(prefix="skillscan_zip_")
+            try:
+                with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                    members = [m for m in zf.namelist() if not m.endswith("/")]
+                    if len(members) > _MAX_ZIP_FILES:
+                        raise ValueError(
+                            f"ZIP contains {len(members)} files, max is {_MAX_ZIP_FILES}"
+                        )
+                    for member in members:
+                        ext = Path(member).suffix.lower()
+                        if ext not in _ALLOWED_ZIP_EXTS:
+                            raise ValueError(
+                                f"Disallowed file type in ZIP: {member} "
+                                f"(allowed: {', '.join(sorted(_ALLOWED_ZIP_EXTS))})"
+                            )
+                    zf.extractall(zip_temp_dir)
+
+                # Find SKILL.md or first .md file
+                extracted = list(Path(zip_temp_dir).rglob("*"))
+                extracted_files = [p for p in extracted if p.is_file()]
+                skill_md = None
+                first_md = None
+                for p in extracted_files:
+                    if p.name.upper() == "SKILL.MD" and skill_md is None:
+                        skill_md = p
+                    if p.suffix.lower() == ".md" and first_md is None:
+                        first_md = p
+                main_file = skill_md or first_md
+                if not main_file:
+                    raise ValueError("ZIP does not contain any .md files")
+
+                skill_content = main_file.read_text()
+                params["skill_content"] = skill_content
+            except Exception:
+                shutil.rmtree(zip_temp_dir, ignore_errors=True)
+                raise
 
         # Check cache first
         cache_key = _cache_key(skill_content, model)
@@ -437,12 +486,47 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         if not api_key and cfg.get("env_key"):
             api_key = os.environ.get(str(cfg["env_key"])) or os.environ.get("OPENAI_API_KEY")
 
-        # Write skill to a temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, prefix="skillscan_"
-        ) as f:
-            f.write(skill_content)
-            skill_path = f.name
+        # Write skill to a temp file or temp directory (multi-file / ZIP)
+        skill_files: dict[str, str] | None = params.get("skill_files")
+        temp_dir: str | None = None
+        scan_target: str  # path for static scan / lint (file or directory)
+
+        if zip_temp_dir:
+            # ZIP mode: files already extracted to zip_temp_dir
+            temp_dir = zip_temp_dir
+            skill_path = str(main_file)  # type: ignore[possibly-undefined]
+            scan_target = zip_temp_dir
+        elif skill_files and isinstance(skill_files, dict) and len(skill_files) > 1:
+            # Multi-file mode: write all files to a temp directory
+            temp_dir = tempfile.mkdtemp(prefix="skillscan_multi_")
+            skill_path = ""
+            for fname, content in skill_files.items():
+                # Sanitize filename: no path traversal
+                safe_name = Path(fname).name
+                if not safe_name:
+                    continue
+                fpath = Path(temp_dir) / safe_name
+                fpath.write_text(str(content))
+                # Use SKILL.md as the main skill file if present, else first .md file
+                if not skill_path and safe_name.upper() == "SKILL.MD":
+                    skill_path = str(fpath)
+            # Fallback: if no SKILL.md, use the first .md file, then first file
+            if not skill_path:
+                md_files = list(Path(temp_dir).glob("*.md"))
+                if md_files:
+                    skill_path = str(md_files[0])
+                else:
+                    all_files = list(Path(temp_dir).iterdir())
+                    skill_path = str(all_files[0]) if all_files else ""
+            scan_target = temp_dir
+        else:
+            # Single-file mode (original behavior)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".md", delete=False, prefix="skillscan_"
+            ) as f:
+                f.write(skill_content)
+                skill_path = f.name
+            scan_target = skill_path
 
         # Author declarations
         allow_domains: list[str] = list(params.get("allow_domains") or [])
@@ -466,15 +550,19 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 result_dict["allow_commands"] = allow_commands
 
             # Run static scan + lint if requested (no API key needed)
+            # Use scan_target (directory for multi-file, file for single-file)
             run_scan = bool(params.get("include_scan", False))
-            run_lint = bool(params.get("include_lint", False))
+            run_lint_flag = bool(params.get("include_lint", False))
 
             if run_scan:
-                result_dict["static_findings"] = _run_static_scan(skill_path)
-            if run_lint:
-                result_dict["lint_findings"] = _run_lint(skill_path)
+                result_dict["static_findings"] = _run_static_scan(scan_target)
+            if run_lint_flag:
+                result_dict["lint_findings"] = _run_lint(scan_target)
         finally:
-            Path(skill_path).unlink(missing_ok=True)
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            else:
+                Path(skill_path).unlink(missing_ok=True)
 
         # Add provenance metadata
         result_dict["provenance"] = {
@@ -523,7 +611,8 @@ try:
     from pydantic import BaseModel, Field, field_validator
 
     class SubmitRequest(BaseModel):
-        skill_content: str = Field(..., description="Raw SKILL.md content to trace")
+        skill_content: str = Field("", description="Raw SKILL.md content to trace")
+        skill_zip_b64: str | None = Field(None, description="Base64-encoded ZIP of skill directory")
         source_url: str | None = Field(
             None,
             description=(
@@ -572,6 +661,14 @@ try:
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
         include_scan: bool = Field(False, description="Run static scan (audit profile, no key needed)")
         include_lint: bool = Field(False, description="Run lint quality check (no key needed)")
+        skill_files: dict[str, str] | None = Field(
+            None,
+            description=(
+                "Dict of filename->content for multi-file skills. "
+                "When provided, files are written to a temp directory and "
+                "processed as a skill directory (enables skill graph analysis)."
+            ),
+        )
 
 except ImportError:
     SubmitRequest = None  # type: ignore[assignment,misc]

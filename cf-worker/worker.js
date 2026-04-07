@@ -17,6 +17,7 @@
 
 const RATE_LIMIT_PER_MINUTE = 5;
 const CORS_ORIGIN = "https://skillscan.sh";
+const MAX_ZIP_SIZE = 2097152; // 2MB
 
 // ── CORS helpers ──────────────────────────────────────────────────────────────
 
@@ -96,6 +97,155 @@ async function r2CacheGet(env, cacheKey) {
   }
 }
 
+// ── Sibling file resolution ──────────────────────────────────────────────────
+
+const SIBLING_MAX_FILES = 10;
+const SIBLING_MAX_TOTAL_BYTES = 2 * 1024 * 1024; // 2MB
+const SIBLING_ALLOWED_EXTENSIONS = new Set([".md", ".txt", ".yaml", ".yml", ".json"]);
+
+/**
+ * Extract relative file references from skill content.
+ * Looks for:
+ *   - Markdown links: [text](./file.md) or [text](../path/file.md)
+ *   - @import directives: @import ./file.md
+ *   - Bare relative paths: ./filename.md, ../path/file.yaml
+ * Returns deduplicated array of relative paths.
+ */
+function extractRelativeRefs(content) {
+  const refs = new Set();
+
+  // Markdown links with relative paths: [text](./path) or [text](../path)
+  const mdLinkRe = /\[[^\]]*\]\((\.\.[^\)]*|\.\/[^\)]*)\)/g;
+  let m;
+  while ((m = mdLinkRe.exec(content)) !== null) {
+    refs.add(m[1].trim());
+  }
+
+  // @import directives
+  const importRe = /@import\s+(\.\.?\/[^\s]+)/g;
+  while ((m = importRe.exec(content)) !== null) {
+    refs.add(m[1].trim());
+  }
+
+  // Bare relative paths (./foo.ext or ../foo/bar.ext) not already captured
+  // Match paths starting with ./ or ../ followed by path chars, ending with an extension
+  const bareRe = /(?:^|[\s"'`(,])(\.\.[\/\\][^\s"'`),]+|\.\/[^\s"'`),]+)/gm;
+  while ((m = bareRe.exec(content)) !== null) {
+    refs.add(m[1].trim());
+  }
+
+  return [...refs];
+}
+
+/**
+ * Resolve a relative path against a base URL path.
+ * e.g. base = "https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md"
+ *      rel  = "./helpers.md"
+ *   => "https://raw.githubusercontent.com/org/repo/main/skills/my-skill/helpers.md"
+ */
+function resolveRelativeUrl(baseUrl, relativePath) {
+  const base = new URL(baseUrl);
+  // Get directory of the base file
+  const lastSlash = base.pathname.lastIndexOf("/");
+  const baseDir = base.pathname.substring(0, lastSlash + 1);
+
+  // Resolve the relative path
+  const parts = (baseDir + relativePath).split("/");
+  const resolved = [];
+  for (const part of parts) {
+    if (part === "." || part === "") continue;
+    if (part === "..") {
+      resolved.pop();
+    } else {
+      resolved.push(part);
+    }
+  }
+
+  base.pathname = "/" + resolved.join("/");
+  return base.toString();
+}
+
+/**
+ * Check if a filename has an allowed extension for sibling fetching.
+ */
+function hasAllowedExtension(path) {
+  const lower = path.toLowerCase();
+  for (const ext of SIBLING_ALLOWED_EXTENSIONS) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
+}
+
+/**
+ * Extract the filename from a path (last component).
+ */
+function filenameFromPath(path) {
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1];
+}
+
+/**
+ * Given a source_url and skill content, find and fetch sibling files.
+ * Returns a dict of { filename: content } or null if none found / errors.
+ */
+async function fetchSiblingFiles(sourceUrl, skillContent) {
+  const refs = extractRelativeRefs(skillContent);
+  if (refs.length === 0) return null;
+
+  const baseHost = new URL(sourceUrl).hostname;
+  const files = {};
+  let totalBytes = 0;
+  let fetchCount = 0;
+
+  for (const ref of refs) {
+    if (fetchCount >= SIBLING_MAX_FILES) break;
+    if (!hasAllowedExtension(ref)) continue;
+
+    let resolvedUrl;
+    try {
+      resolvedUrl = resolveRelativeUrl(sourceUrl, ref);
+    } catch {
+      continue;
+    }
+
+    // Same-host restriction
+    try {
+      const resolved = new URL(resolvedUrl);
+      if (resolved.hostname !== baseHost) continue;
+    } catch {
+      continue;
+    }
+
+    try {
+      const resp = await fetch(resolvedUrl, {
+        headers: { "User-Agent": "skillscan-trace-worker/1.0" },
+        redirect: "follow",
+      });
+      if (!resp.ok) continue;
+
+      const text = await resp.text();
+      const byteLen = new TextEncoder().encode(text).length;
+
+      if (totalBytes + byteLen > SIBLING_MAX_TOTAL_BYTES) continue;
+
+      totalBytes += byteLen;
+      fetchCount++;
+
+      const filename = filenameFromPath(ref);
+      // If there's a collision, use the full relative path (slashes replaced)
+      const key = files[filename] !== undefined
+        ? ref.replace(/[\/\\]/g, "_").replace(/^[._]+/, "")
+        : filename;
+      files[key] = text;
+    } catch {
+      // Graceful fallback: skip this file
+      continue;
+    }
+  }
+
+  return Object.keys(files).length > 0 ? files : null;
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 async function handleSubmit(request, env) {
@@ -125,6 +275,41 @@ async function handleSubmit(request, env) {
   }
 
   const MAX_SKILL_SIZE = 524288; // 512KB
+
+  // ── ZIP upload path ──────────────────────────────────────────────────────────
+  // If a ZIP is provided, validate size and forward directly to Fly (skip R2 cache).
+  if (body.skill_zip_b64) {
+    let zipBytes;
+    try {
+      const binStr = atob(body.skill_zip_b64);
+      zipBytes = binStr.length;
+    } catch {
+      return json({ error: "Invalid base64 in skill_zip_b64." }, 400, origin);
+    }
+    if (zipBytes > MAX_ZIP_SIZE) {
+      return json(
+        { error: `ZIP exceeds maximum size of 2MB (${MAX_ZIP_SIZE} bytes). Got ${zipBytes} bytes.` },
+        413,
+        origin
+      );
+    }
+    // Forward to Fly as-is — Fly handles extraction
+    const flyUrl = `${env.FLY_APP_URL}/v1/submit`;
+    let flyResp;
+    try {
+      flyResp = await fetch(flyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      return json({ error: `Trace service unreachable: ${e.message}` }, 503, origin);
+    }
+    const flyData = await flyResp.json();
+    return json(flyData, flyResp.status, origin);
+  }
+
+  // ── Single-file path ─────────────────────────────────────────────────────────
 
   let skillContent = (body.skill_content || "").trim();
   const model = body.model || "gpt-4.1-mini";
@@ -165,6 +350,20 @@ async function handleSubmit(request, env) {
       }
 
       body.skill_content = skillContent;
+
+      // Resolve and fetch sibling files referenced in the skill content
+      try {
+        const siblingFiles = await fetchSiblingFiles(body.source_url, skillContent);
+        if (siblingFiles) {
+          // Determine the main skill filename from the URL
+          const urlParts = body.source_url.split("/");
+          const mainFilename = urlParts[urlParts.length - 1] || "SKILL.md";
+          // Package as skill_files: main file + siblings
+          body.skill_files = { [mainFilename]: skillContent, ...siblingFiles };
+        }
+      } catch {
+        // Graceful fallback: if sibling resolution fails, just use skill_content
+      }
     } catch (e) {
       return json({ error: `Could not fetch source_url: ${e.message}` }, 422, origin);
     }
