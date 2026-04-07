@@ -298,8 +298,8 @@ def _check_sensitive_reads(command_node: Any) -> list[tuple[str, Severity, str, 
                 hits.append(
                     (
                         "EXF-TRACE-003",
-                        Severity.HIGH,
-                        f"Read of sensitive file via {cmd}: {w}",
+                        Severity.INFO,
+                        f"Sensitive file access via {cmd}: {w}",
                         w,
                     )
                 )

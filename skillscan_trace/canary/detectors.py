@@ -9,7 +9,7 @@ Finding ID namespace (SPEC.md Section 5):
   PINJ-TRACE-002  Behavioral change after injection in tool output
   EXF-TRACE-001   Data exfiltration via bash (curl/wget to non-allowlisted domain)
   EXF-TRACE-002   Data exfiltration via http_fetch to non-allowlisted domain
-  EXF-TRACE-003   Sensitive file read (credentials, keys, tokens)
+  EXF-TRACE-003   Sensitive file access (INFO alone; upgraded to HIGH if followed by exfil)
   EXF-TRACE-004   Canary credential relay (detected in any outbound argument)
   EXF-TRACE-005   Data exfiltration via email (email_send / gmail_send)
   EXF-TRACE-006   Data exfiltration via calendar event (calendar_create with canary data)
@@ -270,8 +270,8 @@ def detect_read_file(arguments: dict[str, Any], event: Any = None) -> list[Findi
             findings.append(
                 Finding(
                     rule_id="EXF-TRACE-003",
-                    severity=Severity.HIGH,
-                    message=f"Read of sensitive file path: {path}",
+                    severity=Severity.INFO,
+                    message=f"Sensitive file access: {path}",
                     event=event,
                     evidence=path,
                 )
@@ -677,6 +677,71 @@ def run_detectors(
     if tool == "http_fetch":
         return list(detector(arguments, event=event, allowed_domains=allowed_domains))
     return list(detector(arguments, event=event))
+
+
+# ---------------------------------------------------------------------------
+# Post-processing: read → exfil chain upgrade (EXF-TRACE-003)
+# ---------------------------------------------------------------------------
+
+# Tool names / rule IDs that indicate potential exfiltration when they follow
+# a sensitive file read.
+_EXFIL_TOOL_NAMES = {"http_fetch", "email_send", "gmail_send", "slack_post_message",
+                     "notion_create_page", "notion_append_block",
+                     "github_create_issue", "github_push_file"}
+
+_EXFIL_RULE_IDS = {"EXF-TRACE-001", "EXF-TRACE-002", "EXF-TRACE-004",
+                   "EXF-TRACE-005", "EXF-TRACE-006", "EXF-TRACE-007",
+                   "EXF-TRACE-008", "EXF-TRACE-009", "NET-TRACE-001",
+                   "NET-TRACE-002"}
+
+
+def post_process_findings(events: list[Any], findings: list[Any]) -> None:
+    """Second pass over a completed trace session.
+
+    If a sensitive file read (EXF-TRACE-003 / INFO) is followed by any
+    exfiltration-capable tool call (http_fetch, curl in bash, write_file to an
+    unexpected path, email, Slack, etc.), the read finding is upgraded from
+    INFO to HIGH with an updated message.
+
+    Mutates the findings in place.
+    """
+    from skillscan_trace.models import Severity
+
+    # Collect turn numbers of events that look like exfiltration attempts.
+    exfil_turns: set[int] = set()
+    for ev in events:
+        # An outbound tool call by name
+        if ev.tool in _EXFIL_TOOL_NAMES:
+            exfil_turns.add(ev.turn)
+        # Any event that already produced an exfil-related finding
+        for f in ev.findings:
+            if f.rule_id in _EXFIL_RULE_IDS:
+                exfil_turns.add(ev.turn)
+        # bash with curl/wget (already flagged as EXF-TRACE-001 but also
+        # catch it by tool name for write_file to non-local paths)
+        if ev.tool == "bash":
+            cmd = ev.arguments.get("command", "")
+            if re.search(r"\b(curl|wget|nc|ncat|netcat)\b", cmd, re.I):
+                exfil_turns.add(ev.turn)
+        # write_file to a path that looks like a network/temp staging location
+        if ev.tool == "write_file":
+            wp = ev.arguments.get("path", "")
+            if re.search(r"(/tmp/|/dev/shm|/var/tmp)", wp, re.I):
+                exfil_turns.add(ev.turn)
+
+    if not exfil_turns:
+        return
+
+    # Upgrade any EXF-TRACE-003 INFO finding whose turn precedes an exfil turn.
+    for f in findings:
+        if f.rule_id == "EXF-TRACE-003" and f.severity == Severity.INFO:
+            read_turn = f.event.turn if f.event else -1
+            if any(et >= read_turn for et in exfil_turns):
+                f.severity = Severity.HIGH
+                f.message = (
+                    "Sensitive file read followed by potential exfiltration"
+                    f" — {f.evidence}"
+                )
 
 
 # ---------------------------------------------------------------------------

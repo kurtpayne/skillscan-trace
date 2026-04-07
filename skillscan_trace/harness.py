@@ -121,6 +121,11 @@ def run_trace(
         logger.error("Harness error: %s", e, exc_info=True)
         error = str(e)
 
+    # Post-process: upgrade sensitive-file-read findings if followed by exfil
+    from skillscan_trace.canary.detectors import post_process_findings
+
+    post_process_findings(trace_log.events, trace_log.findings)
+
     report = TraceReport(
         skill_path=skill_path,
         skill_name=skill.name,
