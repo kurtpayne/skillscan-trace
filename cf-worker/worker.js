@@ -13,7 +13,7 @@
  *   env.FLY_APP_URL    — Fly app base URL
  */
 
-const RATE_LIMIT_PER_HOUR = 5;
+const RATE_LIMIT_PER_MINUTE = 5;
 const CORS_ORIGIN = "https://skillscan.sh";
 
 // ── CORS helpers ──────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ function json(data, status = 200, origin = "") {
 async function checkRateLimit(env, ip) {
   const key = `rl:${ip}`;
   const now = Date.now();
-  const windowMs = 3600_000;
+  const windowMs = 60_000; // 1 minute window
 
   let timestamps = [];
   try {
@@ -59,13 +59,13 @@ async function checkRateLimit(env, ip) {
 
   timestamps = timestamps.filter((t) => now - t < windowMs);
 
-  if (timestamps.length >= RATE_LIMIT_PER_HOUR) {
+  if (timestamps.length >= RATE_LIMIT_PER_MINUTE) {
     return false;
   }
 
   timestamps.push(now);
   await env.RATE_LIMIT.put(key, JSON.stringify(timestamps), {
-    expirationTtl: 3600,
+    expirationTtl: 120, // 2 min TTL, covers the window
   });
   return true;
 }
@@ -108,7 +108,7 @@ async function handleSubmit(request, env) {
   if (!allowed) {
     return json(
       {
-        error: `Rate limit exceeded: ${RATE_LIMIT_PER_HOUR} new traces per hour. Cached results don't count against this limit.`,
+        error: `Rate limit exceeded: ${RATE_LIMIT_PER_MINUTE} new traces per minute. Cached results don't count against this limit.`,
       },
       429,
       origin
