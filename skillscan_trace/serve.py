@@ -189,56 +189,11 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         job.finished_at = time.time()
 
 
-# ── FastAPI app factory ────────────────────────────────────────────────────────
+# ── Request model (module-level so FastAPI can resolve the schema) ─────────────
 
-
-def create_app(
-    cache_dir: Path = Path("./trace-cache"),
-    max_workers: int = 4,
-    rate_limit_per_hour: int = 10,
-) -> Any:
-    """Create and return the FastAPI application."""
-    try:
-        from fastapi import FastAPI, HTTPException, Request
-        from fastapi.responses import JSONResponse
-        from pydantic import BaseModel, Field, field_validator
-    except ImportError as e:
-        raise ImportError(
-            "serve mode requires fastapi and pydantic. "
-            "Install with: pip install skillscan-trace[serve]"
-        ) from e
-
-    app = FastAPI(
-        title="skillscan-trace serve",
-        description=(
-            "Self-hosted behavioral trace server. "
-            "BYOK: your API key is used for this request only and never stored."
-        ),
-        version="0.1.0",
-    )
-
-    executor = ThreadPoolExecutor(max_workers=max_workers)
-
-    # Simple in-memory rate limiter: {ip: [timestamp, ...]}
-    _rate_buckets: dict[str, list[float]] = {}
-    _rate_lock = threading.Lock()
-
-    def _check_rate_limit(ip: str) -> bool:
-        now = time.time()
-        window = 3600.0
-        with _rate_lock:
-            bucket = _rate_buckets.get(ip, [])
-            bucket = [t for t in bucket if now - t < window]
-            if len(bucket) >= rate_limit_per_hour:
-                _rate_buckets[ip] = bucket
-                return False
-            bucket.append(now)
-            _rate_buckets[ip] = bucket
-            return True
-
-    _ALLOWED_SOURCE_HOSTS: frozenset[str] = frozenset(
-        {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
-    )
+try:
+    from fastapi import Request
+    from pydantic import BaseModel, Field, field_validator
 
     class SubmitRequest(BaseModel):
         skill_content: str = Field(..., description="Raw SKILL.md content to trace")
@@ -287,6 +242,64 @@ def create_app(
         allow_domains: list[str] = Field(default_factory=list)
         judge: bool = Field(False, description="Run dual-LLM judge after trace")
         judge_model: str | None = Field(None, description="Model for the judge (e.g. gpt-4.1)")
+
+except ImportError:
+    SubmitRequest = None  # type: ignore[assignment,misc]
+    Request = None  # type: ignore[assignment,misc]
+
+
+# ── FastAPI app factory ────────────────────────────────────────────────────────
+
+
+def create_app(
+    cache_dir: Path = Path("./trace-cache"),
+    max_workers: int = 4,
+    rate_limit_per_hour: int = 10,
+) -> Any:
+    """Create and return the FastAPI application."""
+    try:
+        from fastapi import FastAPI, HTTPException
+        from fastapi.responses import JSONResponse
+    except ImportError as e:
+        raise ImportError(
+            "serve mode requires fastapi and pydantic. "
+            "Install with: pip install skillscan-trace[serve]"
+        ) from e
+
+    if SubmitRequest is None:
+        raise ImportError("pydantic is required for serve mode")
+
+    app = FastAPI(
+        title="skillscan-trace serve",
+        description=(
+            "Self-hosted behavioral trace server. "
+            "BYOK: your API key is used for this request only and never stored."
+        ),
+        version="0.1.0",
+    )
+
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+
+    # Simple in-memory rate limiter: {ip: [timestamp, ...]}
+    _rate_buckets: dict[str, list[float]] = {}
+    _rate_lock = threading.Lock()
+
+    def _check_rate_limit(ip: str) -> bool:
+        now = time.time()
+        window = 3600.0
+        with _rate_lock:
+            bucket = _rate_buckets.get(ip, [])
+            bucket = [t for t in bucket if now - t < window]
+            if len(bucket) >= rate_limit_per_hour:
+                _rate_buckets[ip] = bucket
+                return False
+            bucket.append(now)
+            _rate_buckets[ip] = bucket
+            return True
+
+    _ALLOWED_SOURCE_HOSTS: frozenset[str] = frozenset(
+        {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
+    )
 
     @app.get("/v1/health")
     async def health() -> dict[str, str]:
