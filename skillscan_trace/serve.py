@@ -53,7 +53,8 @@ class Job:
     def __init__(self, job_id: str, params: dict[str, Any]) -> None:
         self.job_id = job_id
         self.params = params
-        self.status = JobStatus.PENDING
+        self.status = JobStatus.RUNNING
+        self.progress: str = "Preparing..."
         self.result: dict[str, Any] | None = None
         self.error: str | None = None
         self.created_at = time.time()
@@ -418,6 +419,7 @@ def _run_lint(skill_path: str) -> list[dict[str, Any]]:
 def _run_job(job: Job, cache_dir: Path) -> None:
     """Execute a trace job in a background thread."""
     job.status = JobStatus.RUNNING
+    job.progress = "Preparing..."
     params = job.params
 
     try:
@@ -513,6 +515,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             return
 
         # Resolve provider
+        job.progress = "Resolving provider..."
         from skillscan_trace.cli import PROVIDER_CONFIGS
 
         cfg = PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["openai"])
@@ -572,6 +575,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             judge_model: str | None = params.get("judge_model")
             input_model: str = judge_model or model
 
+            job.progress = "Running trace..."
             report = run_trace(
                 skill_path,
                 model=model,
@@ -592,8 +596,10 @@ def _run_job(job: Job, cache_dir: Path) -> None:
 
             # Run static scan + lint if requested (no API key needed)
             if run_scan:
+                job.progress = "Running static scan..."
                 result_dict["static_findings"] = _run_static_scan(scan_target)
             if run_lint:
+                job.progress = "Running lint..."
                 result_dict["lint_findings"] = _run_lint(scan_target)
         finally:
             if temp_dir:
@@ -601,13 +607,26 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             else:
                 Path(skill_path).unlink(missing_ok=True)
 
-        # Add provenance metadata
+        # Add provenance metadata — includes all inputs for attestation
+        job.progress = "Finalizing report..."
+        source_url: str | None = params.get("source_url")
         result_dict["provenance"] = {
             "server_version": "0.2.0",
             "trace_engine": "skillscan-trace",
             "fly_region": os.environ.get("FLY_REGION", "unknown"),
             "fly_machine_id": os.environ.get("FLY_MACHINE_ID", "unknown"),
             "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "inputs": {
+                "source_url": source_url,
+                "provider": provider,
+                "model": model,
+                "variants": variants,
+                "max_turns": max_turns,
+                "include_scan": run_scan,
+                "include_lint": run_lint,
+                "skill_name": result_dict.get("skill_name"),
+                "skill_sha256": result_dict.get("skill_sha256"),
+            },
             "report_sha256": hashlib.sha256(
                 json.dumps(result_dict, sort_keys=True).encode()
             ).hexdigest(),
@@ -832,7 +851,11 @@ def create_app(
         if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
             return JSONResponse(
                 status_code=202,
-                content={"job_id": job_id, "status": job.status},
+                content={
+                    "job_id": job_id,
+                    "status": job.status,
+                    "progress": job.progress,
+                },
             )
         if job.status == JobStatus.ERROR:
             return JSONResponse(
