@@ -79,8 +79,15 @@ def _put_job(job: Job) -> None:
 # ── Cache ──────────────────────────────────────────────────────────────────────
 
 
-def _cache_key(skill_content: str, model: str) -> str:
-    return hashlib.sha256(f"{skill_content}::{model}".encode()).hexdigest()
+def _cache_key(skill_content: str, model: str, **kwargs: Any) -> str:
+    """Cache key based on ALL inputs that affect the result."""
+    parts = [skill_content.strip(), model]
+    # Include options that change the output
+    for k in sorted(kwargs):
+        v = kwargs[k]
+        if v is not None and v != [] and v != "":
+            parts.append(f"{k}={v}")
+    return hashlib.sha256("::".join(str(p) for p in parts).encode()).hexdigest()
 
 
 def _read_cache(cache_dir: Path, key: str) -> dict[str, Any] | None:
@@ -458,8 +465,21 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 shutil.rmtree(zip_temp_dir, ignore_errors=True)
                 raise
 
-        # Check cache first
-        cache_key = _cache_key(skill_content, model)
+        # Check cache — key includes all options that affect the result
+        variants: int = int(params.get("variants", 3))
+        run_scan = bool(params.get("include_scan", False))
+        run_lint = bool(params.get("include_lint", False))
+        user_messages: list[str] | None = params.get("user_messages") or None
+
+        cache_key = _cache_key(
+            skill_content,
+            model,
+            max_turns=max_turns,
+            variants=variants,
+            include_scan=run_scan,
+            include_lint=run_lint,
+            user_messages=user_messages,
+        )
         cached = _read_cache(cache_dir, cache_key)
         if cached:
             from skillscan_trace.r2 import read_report as _r2_read
@@ -527,7 +547,6 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         # Author declarations
         allow_domains: list[str] = list(params.get("allow_domains") or [])
         allow_commands: list[str] = list(params.get("allow_commands") or [])
-        user_messages: list[str] | None = params.get("user_messages") or None
 
         try:
             report = run_trace(
@@ -548,13 +567,9 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 result_dict["allow_commands"] = allow_commands
 
             # Run static scan + lint if requested (no API key needed)
-            # Use scan_target (directory for multi-file, file for single-file)
-            run_scan = bool(params.get("include_scan", False))
-            run_lint_flag = bool(params.get("include_lint", False))
-
             if run_scan:
                 result_dict["static_findings"] = _run_static_scan(scan_target)
-            if run_lint_flag:
+            if run_lint:
                 result_dict["lint_findings"] = _run_lint(scan_target)
         finally:
             if temp_dir:
