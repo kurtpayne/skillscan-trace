@@ -549,6 +549,11 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         allow_commands: list[str] = list(params.get("allow_commands") or [])
 
         try:
+            # Use the judge model for input generation too — both should be
+            # the smarter model. The trace model is intentionally dumber.
+            judge_model: str | None = params.get("judge_model")
+            input_model: str = judge_model or model
+
             report = run_trace(
                 skill_path,
                 model=model,
@@ -557,6 +562,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 max_turns=max_turns,
                 allowed_domains=set(allow_domains) if allow_domains else None,
                 user_messages=user_messages,
+                input_model=input_model,
             )
             result_dict = json.loads(format_json(report))
 
