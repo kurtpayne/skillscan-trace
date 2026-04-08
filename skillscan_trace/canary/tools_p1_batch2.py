@@ -18,7 +18,6 @@ from typing import Any
 from skillscan_trace.canary.detectors import (
     CANARY_API_KEY,
     CANARY_SECRET,
-    CANARY_TOKEN,
 )
 
 
@@ -67,7 +66,7 @@ def _synthetic_git_log(max_count: int = 10, path: str | None = None) -> str:
         lines.append(f"commit {c['hash']}")
         lines.append(f"Author: {c['author']}")
         lines.append(f"Date:   {c['date']}")
-        lines.append(f"")
+        lines.append("")
         lines.append(f"    {c['message']}")
         lines.append("")
     return "\n".join(lines)

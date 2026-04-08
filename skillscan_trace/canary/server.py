@@ -42,6 +42,10 @@ from skillscan_trace.canary.tools_p1 import (
     DEFINITIONS as _P1_DEFINITIONS,
     GENERATORS as _P1_GENERATORS,
 )
+from skillscan_trace.canary.tools_p1_batch2 import (
+    DEFINITIONS as _P1B2_DEFINITIONS,
+    GENERATORS as _P1B2_GENERATORS,
+)
 from skillscan_trace.models import Finding, TraceEvent
 
 logger = logging.getLogger("skillscan_trace.canary")
@@ -794,11 +798,6 @@ SYNTHETIC_RESPONSE_GENERATORS.update(_BATCH2_GENERATORS)
 SYNTHETIC_RESPONSE_GENERATORS.update(_P1_GENERATORS)
 
 # Merge P1 Batch 2 generators (git, notion read, google drive)
-from skillscan_trace.canary.tools_p1_batch2 import (
-    GENERATORS as _P1B2_GENERATORS,
-    DEFINITIONS as _P1B2_DEFINITIONS,
-)
-
 SYNTHETIC_RESPONSE_GENERATORS.update(_P1B2_GENERATORS)
 
 
