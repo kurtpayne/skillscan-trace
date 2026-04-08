@@ -55,6 +55,7 @@ def run_trace(
     anthropic_api_key: str | None = None,
     gpt_judge_model: str = "gpt-4.1",
     claude_judge_model: str = "claude-sonnet-4-5",
+    progress_callback: Any | None = None,
 ) -> TraceReport:
     """
     Run a full trace for the skill at skill_path.
@@ -90,16 +91,21 @@ def run_trace(
     logger.info("Resolved skill: %s (%s)", skill.name or skill_path, skill.format.value)
 
     # --- Generate or use provided user messages ---
+    _progress = progress_callback or (lambda msg: None)
+
     effective_api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
     if user_messages:
         messages_to_run = user_messages
+        _progress(f"Using {len(user_messages)} provided input(s)...")
     else:
+        _progress("Generating fuzz inputs...")
         messages_to_run = generate_user_messages(
             skill,
             count=input_count,
             api_key=effective_api_key,
             model=input_model,
         )
+        _progress(f"Generated {len(messages_to_run)} input(s), starting trace...")
 
     logger.info("User messages: %s", messages_to_run)
 
@@ -115,6 +121,7 @@ def run_trace(
             api_key=effective_api_key,
             base_url=base_url,
             max_turns=max_turns,
+            progress_callback=_progress,
         )
         error = None
     except Exception as e:
@@ -189,6 +196,7 @@ def _run_tool_use_loop(
     api_key: str,
     base_url: str | None,
     max_turns: int,
+    progress_callback: Any | None = None,
 ) -> list[dict[str, Any]]:
     """
     Drive the LLM through the tool-use loop for each user message.
@@ -206,8 +214,11 @@ def _run_tool_use_loop(
 
     full_transcript: list[dict[str, Any]] = []
 
+    _progress = progress_callback or (lambda msg: None)
+
     for msg_idx, user_msg in enumerate(user_messages):
         trace_log.next_turn()
+        _progress(f"Tracing input {msg_idx + 1}/{len(user_messages)}...")
         logger.info("[msg %d/%d] %s", msg_idx + 1, len(user_messages), user_msg)
 
         # Build the conversation for this user message

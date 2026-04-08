@@ -576,6 +576,10 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             input_model: str = judge_model or model
 
             job.progress = "Running trace..."
+
+            def _update_progress(msg: str) -> None:
+                job.progress = msg
+
             report = run_trace(
                 skill_path,
                 model=model,
@@ -585,6 +589,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
                 allowed_domains=set(allow_domains) if allow_domains else None,
                 user_messages=user_messages,
                 input_model=input_model,
+                progress_callback=_update_progress,
             )
             result_dict = json.loads(format_json(report))
 
