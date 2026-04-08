@@ -373,9 +373,10 @@ async function handleSubmit(request, env) {
     return json({ error: "skill_content or source_url is required" }, 400, origin);
   }
 
-  // R2 cache check
+  // R2 cache check (skip if force_fresh)
+  const forceFresh = Boolean(body.force_fresh);
   const cacheKey = await sha256(`${skillContent}::${model}`);
-  const cached = await r2CacheGet(env, cacheKey);
+  const cached = forceFresh ? null : await r2CacheGet(env, cacheKey);
   if (cached) {
     return json(
       {

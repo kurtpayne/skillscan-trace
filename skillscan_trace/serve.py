@@ -487,6 +487,8 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         run_lint = bool(params.get("include_lint", False))
         user_messages: list[str] | None = params.get("user_messages") or None
 
+        force_fresh = bool(params.get("force_fresh", False))
+
         cache_key = _cache_key(
             skill_content,
             model,
@@ -496,7 +498,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
             include_lint=run_lint,
             user_messages=user_messages,
         )
-        cached = _read_cache(cache_dir, cache_key)
+        cached = None if force_fresh else _read_cache(cache_dir, cache_key)
         if cached:
             from skillscan_trace.r2 import read_report as _r2_read
             from skillscan_trace.r2 import _REPORT_BASE_URL as _base_url
@@ -698,6 +700,7 @@ try:
             False, description="Run static scan (audit profile, no key needed)"
         )
         include_lint: bool = Field(False, description="Run lint quality check (no key needed)")
+        force_fresh: bool = Field(False, description="Skip cache and run a fresh trace")
         skill_files: dict[str, str] | None = Field(
             None,
             description=(
