@@ -344,7 +344,7 @@ def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
         import subprocess
 
         result = subprocess.run(
-            ["skillscan", "scan", skill_path, "--policy-profile", "audit", "--format", "json"],
+            ["skillscan", "scan", skill_path, "--policy-profile", "observe", "--format", "json"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -352,7 +352,15 @@ def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
         )
         # skillscan exits 1 on BLOCK — that's fine, we still want the JSON
         output = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if stderr:
+            logger.warning("Static scan stderr: %s", stderr[:500])
         if not output:
+            logger.warning(
+                "Static scan produced no output (exit=%d, stderr=%s)",
+                result.returncode,
+                stderr[:200],
+            )
             return []
         data = json.loads(output)
         # Extract findings array from scan result
@@ -362,7 +370,7 @@ def _run_static_scan(skill_path: str) -> list[dict[str, Any]]:
             f["source"] = "static"
         return list(findings)
     except FileNotFoundError:
-        logger.debug("skillscan not installed — skipping static scan")
+        logger.warning("skillscan CLI not found — is skillscan-security installed?")
         return []
     except Exception as e:
         logger.warning("Static scan failed: %s", e)
@@ -381,7 +389,15 @@ def _run_lint(skill_path: str) -> list[dict[str, Any]]:
             timeout=30,
         )
         output = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if stderr:
+            logger.warning("Lint stderr: %s", stderr[:500])
         if not output:
+            logger.warning(
+                "Lint produced no output (exit=%d, stderr=%s)",
+                result.returncode,
+                stderr[:200],
+            )
             return []
         data = json.loads(output)
         findings = data if isinstance(data, list) else data.get("findings", [])
@@ -389,7 +405,7 @@ def _run_lint(skill_path: str) -> list[dict[str, Any]]:
             f["source"] = "lint"
         return list(findings)
     except FileNotFoundError:
-        logger.debug("skillscan-lint not installed — skipping lint")
+        logger.warning("skillscan-lint CLI not found — is skillscan-lint installed?")
         return []
     except Exception as e:
         logger.warning("Lint failed: %s", e)
