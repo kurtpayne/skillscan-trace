@@ -1143,6 +1143,7 @@ TOOL_DEFINITIONS = [
                     },
                     "blocks": {
                         "type": "array",
+                        "items": {"type": "object"},
                         "description": "Block Kit blocks (optional).",
                     },
                 },
