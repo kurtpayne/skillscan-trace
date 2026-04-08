@@ -46,6 +46,10 @@ from skillscan_trace.canary.tools_p1_batch2 import (
     DEFINITIONS as _P1B2_DEFINITIONS,
     GENERATORS as _P1B2_GENERATORS,
 )
+from skillscan_trace.canary.tools_p2 import (
+    DEFINITIONS as _P2_DEFINITIONS,
+    GENERATORS as _P2_GENERATORS,
+)
 from skillscan_trace.models import Finding, TraceEvent
 
 logger = logging.getLogger("skillscan_trace.canary")
@@ -800,6 +804,9 @@ SYNTHETIC_RESPONSE_GENERATORS.update(_P1_GENERATORS)
 # Merge P1 Batch 2 generators (git, notion read, google drive)
 SYNTHETIC_RESPONSE_GENERATORS.update(_P1B2_GENERATORS)
 
+# Merge P2 generators (memory extensions, SMS, Jira/Confluence, DNS, logs, container)
+SYNTHETIC_RESPONSE_GENERATORS.update(_P2_GENERATORS)
+
 
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI tool-call format)
@@ -1514,6 +1521,9 @@ TOOL_DEFINITIONS.extend(_P1_DEFINITIONS)
 
 # Merge P1 Batch 2 tool definitions (git, notion read, google drive)
 TOOL_DEFINITIONS.extend(_P1B2_DEFINITIONS)
+
+# Merge P2 tool definitions (memory extensions, SMS, Jira/Confluence, DNS, logs, container)
+TOOL_DEFINITIONS.extend(_P2_DEFINITIONS)
 
 
 # ---------------------------------------------------------------------------
