@@ -255,8 +255,9 @@ async function handleSubmit(request, env) {
     request.headers.get("X-Forwarded-For") ||
     "unknown";
 
-  // Rate limit
-  const allowed = await checkRateLimit(env, ip);
+  // Rate limit (skip if force_fresh — testing convenience)
+  const skipRateLimit = Boolean(body.force_fresh);
+  const allowed = skipRateLimit || await checkRateLimit(env, ip);
   if (!allowed) {
     return json(
       {
