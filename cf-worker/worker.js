@@ -15,7 +15,7 @@
  *   env.FLY_APP_URL    — Fly app base URL
  */
 
-const RATE_LIMIT_PER_MINUTE = 5;
+const RATE_LIMIT_PER_MINUTE = 20;
 const CORS_ORIGIN = "https://skillscan.sh";
 const MAX_ZIP_SIZE = 2097152; // 2MB
 
