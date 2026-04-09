@@ -262,9 +262,8 @@ async function handleSubmit(request, env) {
     return json({ error: "Invalid JSON body" }, 400, origin);
   }
 
-  // Rate limit (skip if force_fresh — testing convenience)
-  const skipRateLimit = Boolean(body.force_fresh);
-  const allowed = skipRateLimit || await checkRateLimit(env, ip);
+  // Rate limit
+  const allowed = await checkRateLimit(env, ip);
   if (!allowed) {
     return json(
       {
