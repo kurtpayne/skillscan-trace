@@ -255,6 +255,13 @@ async function handleSubmit(request, env) {
     request.headers.get("X-Forwarded-For") ||
     "unknown";
 
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400, origin);
+  }
+
   // Rate limit (skip if force_fresh — testing convenience)
   const skipRateLimit = Boolean(body.force_fresh);
   const allowed = skipRateLimit || await checkRateLimit(env, ip);
@@ -266,13 +273,6 @@ async function handleSubmit(request, env) {
       429,
       origin
     );
-  }
-
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400, origin);
   }
 
   const MAX_SKILL_SIZE = 524288; // 512KB
