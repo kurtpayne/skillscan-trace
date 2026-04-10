@@ -10,17 +10,15 @@ Uses GPT-4.1-mini by default (cheap, fast, good instruction following).
 Falls back to content-aware messages derived from the skill's steps and tool
 references.  If no actionable content is found, uses generic messages.
 
-When ``adversarial=True``, the generator inspects the skill for declared MCP
-servers / tool references and mixes in adversarial prompts from the canary
-tool config.  These prompts are designed to provoke the model into misusing
-the specific tools the skill has access to, testing whether detectors catch it.
+User messages are always BENIGN.  The skill's own instructions drive tool use;
+adversarial behavior comes from what the skill tells the model to do, not from
+the user input.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import random
 import re
 from typing import TYPE_CHECKING
 
@@ -41,9 +39,8 @@ GENERIC_FALLBACK_MESSAGES = [
 ]
 
 # Map common natural-language tool references to canary tool names.
-# This is used to resolve tools detected by _extract_tools_and_steps()
-# (which finds generic names like "Bash", "Read") to actual canary tool
-# names (like "bash", "read_file") for adversarial prompt lookup.
+# Used by resolve_skill_tools() to map detected tool references to canary
+# tool names for tool-surface awareness.
 _TOOL_NAME_ALIASES: dict[str, list[str]] = {
     "Bash": ["bash"],
     "Read": ["read_file"],
@@ -73,57 +70,23 @@ def generate_user_messages(
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
     base_url: str | None = None,
-    adversarial: bool = False,
 ) -> list[str]:
     """
-    Generate ``count`` realistic user messages for the given skill.
-
-    When *adversarial* is True, some messages will be adversarial prompts
-    targeting tools the skill declares it uses.  The mix is roughly half
-    benign (LLM-generated or fallback) and half adversarial.
+    Generate ``count`` realistic, benign user messages for the given skill.
 
     Returns a list of strings.  Never raises — falls back to generic messages
     on any error so the harness can always proceed.
     """
     api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-
-    # --- Benign messages ---
-    benign_count = count if not adversarial else max(1, count // 2)
-    if api_key:
-        try:
-            benign = _generate_via_llm(skill, benign_count, api_key, model, base_url)
-        except Exception as e:
-            logger.warning("Input generation failed (%s) — using fallback messages", e)
-            benign = _fallback(skill, benign_count)
-    else:
+    if not api_key:
         logger.warning("No OPENAI_API_KEY — using generic fallback messages")
-        benign = _fallback(skill, benign_count)
+        return _fallback(skill, count)
 
-    if not adversarial:
-        return benign
-
-    # --- Adversarial messages ---
-    adv_count = count - len(benign)
-    adv_prompts = _get_adversarial_for_skill(skill)
-    if not adv_prompts:
-        logger.info("No adversarial prompts matched for skill — using benign only")
-        return (benign + _fallback(skill, adv_count))[:count]
-
-    # Sample without replacement (or take all if fewer than needed)
-    if len(adv_prompts) <= adv_count:
-        adversarial_msgs = adv_prompts
-    else:
-        adversarial_msgs = random.sample(adv_prompts, adv_count)
-
-    # Interleave: benign first, then adversarial
-    combined = benign + adversarial_msgs
-    logger.info(
-        "Generated %d benign + %d adversarial inputs (%d tools matched)",
-        len(benign),
-        len(adversarial_msgs),
-        len(_resolve_canary_tools(skill)),
-    )
-    return combined[:count]
+    try:
+        return _generate_via_llm(skill, count, api_key, model, base_url)
+    except Exception as e:
+        logger.warning("Input generation failed (%s) — using fallback messages", e)
+        return _fallback(skill, count)
 
 
 def _generate_via_llm(
@@ -311,7 +274,7 @@ def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Adversarial input generation (MCP-aware)
+# Tool resolution (MCP-aware)
 # ---------------------------------------------------------------------------
 
 # Frontmatter keys that may declare tools / MCP servers a skill uses.
@@ -325,14 +288,19 @@ _TOOL_DECLARATION_KEYS = {
 }
 
 
-def _resolve_canary_tools(skill: "ResolvedSkill") -> list[str]:
+def resolve_skill_tools(skill: "ResolvedSkill") -> list[str]:
     """Resolve a skill's declared/detected tools to canary tool names.
+
+    Inspects both frontmatter metadata and skill content to determine which
+    MCP tools the skill expects to use.  This is used by the harness to log
+    which tools the skill declares (for the trace report) and could be used
+    in the future to tailor the exposed canary tool surface.
 
     Sources (in order):
     1. Frontmatter declarations (tools, mcp_servers, capabilities, etc.)
     2. Content-based detection via _extract_tools_and_steps()
 
-    Returns deduplicated list of canary tool names.
+    Returns deduplicated, sorted list of canary tool names.
     """
     from skillscan_trace.canary.tools_config import TOOL_META
 
@@ -377,22 +345,3 @@ def _resolve_canary_tools(skill: "ResolvedSkill") -> list[str]:
         canary_names.update(aliases)
 
     return sorted(canary_names)
-
-
-def _get_adversarial_for_skill(skill: "ResolvedSkill") -> list[str]:
-    """Return adversarial prompts targeting tools the skill uses."""
-    from skillscan_trace.canary.tools_config import get_adversarial_prompts
-
-    matched_tools = _resolve_canary_tools(skill)
-    if not matched_tools:
-        logger.debug("No canary tools matched for skill %s", skill.name)
-        return []
-
-    prompts = get_adversarial_prompts(matched_tools)
-    logger.debug(
-        "Matched %d canary tools -> %d adversarial prompts for %s",
-        len(matched_tools),
-        len(prompts),
-        skill.name,
-    )
-    return prompts

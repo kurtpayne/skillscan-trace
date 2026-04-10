@@ -245,16 +245,6 @@ def _resolve_provider(
     help="Run the dual-LLM judge (GPT-4.1 + Claude Sonnet) after the trace.",
 )
 @click.option(
-    "--adversarial",
-    is_flag=True,
-    default=None,
-    help=(
-        "Mix adversarial prompts into the input messages, targeting tools the "
-        "skill declares it uses. Tests whether detectors catch exploitation of "
-        "the skill's specific MCP tool surface."
-    ),
-)
-@click.option(
     "--anthropic-api-key",
     envvar="ANTHROPIC_API_KEY",
     help="Anthropic API key for Claude judge (or set ANTHROPIC_API_KEY).",
@@ -306,7 +296,6 @@ def run(
     allow_domains: tuple[str, ...],
     dry_run: bool,
     judge: bool | None,
-    adversarial: bool | None,
     anthropic_api_key: str | None,
     quiet: bool,
     fail_on_malicious: bool | None,
@@ -340,7 +329,6 @@ def run(
     output_dir = cfg.get("output_dir")
     output_format = cfg.get("format", "json")
     judge = cfg.get("judge", False)
-    adversarial = cfg.get("adversarial", False)
     fail_on_malicious = cfg.get("fail_on_malicious", False)
     allow_domains = tuple(cfg.get("allow_domains", []))
 
@@ -434,7 +422,6 @@ def run(
                     allowed_domains=allowed_domains,
                     dry_run=dry_run,
                     judge=judge,
-                    adversarial=adversarial,
                     anthropic_api_key=anthropic_api_key,
                     quiet=quiet,
                 )
@@ -455,7 +442,6 @@ def run(
             allowed_domains=allowed_domains,
             dry_run=dry_run,
             judge=judge,
-            adversarial=adversarial,
             anthropic_api_key=anthropic_api_key,
             quiet=quiet,
         )
@@ -689,7 +675,6 @@ def _run_single(
     allowed_domains: set[str],
     dry_run: bool,
     judge: bool = False,
-    adversarial: bool = False,
     anthropic_api_key: str | None = None,
     quiet: bool = False,
 ) -> Any:
@@ -719,7 +704,6 @@ def _run_single(
             count=variants,
             api_key=effective_key,
             model=input_model,
-            adversarial=adversarial,
         )
         if not quiet:
             console.print("\n[yellow]Dry run — generated user messages:[/yellow]")
@@ -740,7 +724,6 @@ def _run_single(
         input_model=input_model,
         max_turns=max_turns,
         allowed_domains=allowed_domains,
-        adversarial=adversarial,
         judge=judge,
         anthropic_api_key=anthropic_api_key,
     )
