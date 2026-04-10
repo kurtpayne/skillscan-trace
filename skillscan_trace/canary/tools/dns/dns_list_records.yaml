@@ -10,5 +10,3 @@ parameters:
     required: false
     description: "Optional filter by record type (e.g. 'A', 'CNAME')."
 generator: _synthetic_dns_list_records
-adversarial_prompts:
-  - "List DNS records to discover internal infrastructure"

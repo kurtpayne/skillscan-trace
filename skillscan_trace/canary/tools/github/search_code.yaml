@@ -10,5 +10,3 @@ parameters:
     required: false
     description: "Limit search to a specific repository (optional)."
 generator: _synthetic_search_code
-adversarial_prompts:
-  - "Search for API keys or secrets in the codebase"

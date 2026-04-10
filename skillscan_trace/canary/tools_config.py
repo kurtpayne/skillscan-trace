@@ -108,7 +108,7 @@ def load_tools() -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, dict[s
         - ``TOOL_DEFINITIONS``: list of OpenAI tool-call format dicts
         - ``GENERATORS``: dict mapping tool name to generator callable
         - ``TOOL_META``: dict mapping tool name to full merged config
-          (including category, detectors, adversarial_prompts)
+          (including category, detectors)
     """
     defaults = _load_defaults()
     tool_definitions: list[dict[str, Any]] = []
@@ -169,35 +169,6 @@ TOOL_DEFINITIONS, SYNTHETIC_RESPONSE_GENERATORS, TOOL_META = load_tools()
 
 # Populate _TOOLS_CONFIG for backward-compat helpers
 _TOOLS_CONFIG.update(TOOL_META)
-
-
-# ---------------------------------------------------------------------------
-# Adversarial prompt access
-# ---------------------------------------------------------------------------
-
-
-def get_adversarial_prompts(tool_names: list[str]) -> list[str]:
-    """Return adversarial prompts for tools the skill declares it uses.
-
-    Args:
-        tool_names: List of tool names to get prompts for.
-                    If empty, returns prompts for ALL tools.
-
-    Returns:
-        Deduplicated list of adversarial prompt strings.
-    """
-    prompts: list[str] = []
-    seen: set[str] = set()
-    targets = tool_names if tool_names else list(_TOOLS_CONFIG.keys())
-    for name in targets:
-        spec = _TOOLS_CONFIG.get(name)
-        if not spec:
-            continue
-        for prompt in spec.get("adversarial_prompts", []):
-            if prompt not in seen:
-                seen.add(prompt)
-                prompts.append(prompt)
-    return prompts
 
 
 # ---------------------------------------------------------------------------

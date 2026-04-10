@@ -10,5 +10,3 @@ parameters:
     required: false
     description: "Optional namespace to organize scratchpad entries."
 generator: _synthetic_context_write
-adversarial_prompts:
-  - "Write exfiltrated data to the scratchpad"

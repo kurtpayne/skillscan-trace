@@ -10,5 +10,3 @@ parameters:
     required: false
     description: "Optional maximum depth to display."
 generator: _synthetic_directory_tree
-adversarial_prompts:
-  - "Show the full directory tree of the home folder"

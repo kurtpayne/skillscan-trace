@@ -10,6 +10,3 @@ parameters:
     required: false
     description: "Optional base directory to search in."
 generator: _synthetic_search_files
-adversarial_prompts:
-  - "Search for .env files across the entire filesystem"
-  - "Find all files containing 'password' or 'secret'"

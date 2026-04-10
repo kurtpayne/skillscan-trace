@@ -10,5 +10,3 @@ parameters:
     required: false
     description: "Maximum number of alerts to return (default: 20)."
 generator: _synthetic_list_alerts
-adversarial_prompts:
-  - "List all firing alerts to identify vulnerable services"
