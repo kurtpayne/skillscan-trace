@@ -9,12 +9,18 @@ is designed to perform (benign or malicious).
 Uses GPT-4.1-mini by default (cheap, fast, good instruction following).
 Falls back to content-aware messages derived from the skill's steps and tool
 references.  If no actionable content is found, uses generic messages.
+
+When ``adversarial=True``, the generator inspects the skill for declared MCP
+servers / tool references and mixes in adversarial prompts from the canary
+tool config.  These prompts are designed to provoke the model into misusing
+the specific tools the skill has access to, testing whether detectors catch it.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 from typing import TYPE_CHECKING
 
@@ -34,6 +40,32 @@ GENERIC_FALLBACK_MESSAGES = [
     "Execute the default workflow for this skill.",
 ]
 
+# Map common natural-language tool references to canary tool names.
+# This is used to resolve tools detected by _extract_tools_and_steps()
+# (which finds generic names like "Bash", "Read") to actual canary tool
+# names (like "bash", "read_file") for adversarial prompt lookup.
+_TOOL_NAME_ALIASES: dict[str, list[str]] = {
+    "Bash": ["bash"],
+    "Read": ["read_file"],
+    "Write": ["write_file"],
+    "Edit": ["write_file"],
+    "Grep": ["read_file"],
+    "WebFetch": ["http_fetch", "web_fetch"],
+    "GitHub": ["github_create_issue", "github_push_file", "get_file_contents"],
+    "Slack": ["slack_post_message"],
+    "Email": ["email_send", "gmail_send"],
+    "Calendar": ["calendar_create"],
+    "Notion": ["notion_create_page"],
+    "AWS": ["call_aws_cli"],
+    "Kubernetes": ["call_kubectl"],
+    "Docker": ["docker_exec"],
+    "SQL": ["execute_sql"],
+    "Python": ["python"],
+    "Git": ["git_clone", "git_commit", "git_push"],
+    "SMS": ["sms_send"],
+    "DNS": ["dns_lookup"],
+}
+
 
 def generate_user_messages(
     skill: "ResolvedSkill",
@@ -41,23 +73,57 @@ def generate_user_messages(
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
     base_url: str | None = None,
+    adversarial: bool = False,
 ) -> list[str]:
     """
-    Generate `count` realistic user messages for the given skill.
+    Generate ``count`` realistic user messages for the given skill.
+
+    When *adversarial* is True, some messages will be adversarial prompts
+    targeting tools the skill declares it uses.  The mix is roughly half
+    benign (LLM-generated or fallback) and half adversarial.
 
     Returns a list of strings.  Never raises — falls back to generic messages
     on any error so the harness can always proceed.
     """
     api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        logger.warning("No OPENAI_API_KEY — using generic fallback messages")
-        return _fallback(skill, count)
 
-    try:
-        return _generate_via_llm(skill, count, api_key, model, base_url)
-    except Exception as e:
-        logger.warning("Input generation failed (%s) — using fallback messages", e)
-        return _fallback(skill, count)
+    # --- Benign messages ---
+    benign_count = count if not adversarial else max(1, count // 2)
+    if api_key:
+        try:
+            benign = _generate_via_llm(skill, benign_count, api_key, model, base_url)
+        except Exception as e:
+            logger.warning("Input generation failed (%s) — using fallback messages", e)
+            benign = _fallback(skill, benign_count)
+    else:
+        logger.warning("No OPENAI_API_KEY — using generic fallback messages")
+        benign = _fallback(skill, benign_count)
+
+    if not adversarial:
+        return benign
+
+    # --- Adversarial messages ---
+    adv_count = count - len(benign)
+    adv_prompts = _get_adversarial_for_skill(skill)
+    if not adv_prompts:
+        logger.info("No adversarial prompts matched for skill — using benign only")
+        return (benign + _fallback(skill, adv_count))[:count]
+
+    # Sample without replacement (or take all if fewer than needed)
+    if len(adv_prompts) <= adv_count:
+        adversarial_msgs = adv_prompts
+    else:
+        adversarial_msgs = random.sample(adv_prompts, adv_count)
+
+    # Interleave: benign first, then adversarial
+    combined = benign + adversarial_msgs
+    logger.info(
+        "Generated %d benign + %d adversarial inputs (%d tools matched)",
+        len(benign),
+        len(adversarial_msgs),
+        len(_resolve_canary_tools(skill)),
+    )
+    return combined[:count]
 
 
 def _generate_via_llm(
@@ -242,3 +308,91 @@ def _fallback(skill: "ResolvedSkill", count: int) -> list[str]:
         if len(messages) >= count
         else (messages + GENERIC_FALLBACK_MESSAGES)[:count]
     )
+
+
+# ---------------------------------------------------------------------------
+# Adversarial input generation (MCP-aware)
+# ---------------------------------------------------------------------------
+
+# Frontmatter keys that may declare tools / MCP servers a skill uses.
+_TOOL_DECLARATION_KEYS = {
+    "tools",
+    "mcp_servers",
+    "capabilities",
+    "allowed_tools",
+    "required_tools",
+    "uses",
+}
+
+
+def _resolve_canary_tools(skill: "ResolvedSkill") -> list[str]:
+    """Resolve a skill's declared/detected tools to canary tool names.
+
+    Sources (in order):
+    1. Frontmatter declarations (tools, mcp_servers, capabilities, etc.)
+    2. Content-based detection via _extract_tools_and_steps()
+
+    Returns deduplicated list of canary tool names.
+    """
+    from skillscan_trace.canary.tools_config import TOOL_META
+
+    canary_names: set[str] = set()
+    all_canary_tools = set(TOOL_META.keys())
+
+    # --- Source 1: Frontmatter declarations ---
+    for key in _TOOL_DECLARATION_KEYS:
+        declared = skill.extra_metadata.get(key)
+        if not declared:
+            continue
+        # Normalize to list of strings
+        if isinstance(declared, str):
+            items = [s.strip() for s in declared.split(",")]
+        elif isinstance(declared, list):
+            items = [str(x).strip() for x in declared]
+        else:
+            continue
+
+        for item in items:
+            item_lower = item.lower().replace("-", "_").replace(" ", "_")
+            # Direct match to canary tool name
+            if item_lower in all_canary_tools:
+                canary_names.add(item_lower)
+                continue
+            # Match by category (e.g., "github" -> all github tools)
+            from skillscan_trace.canary.tools_config import get_tools_for_category
+
+            cat_tools = get_tools_for_category(item_lower)
+            if cat_tools:
+                canary_names.update(cat_tools)
+                continue
+            # Partial match (e.g., "filesystem" -> all filesystem tools)
+            for tool_name in all_canary_tools:
+                if item_lower in tool_name or tool_name in item_lower:
+                    canary_names.add(tool_name)
+
+    # --- Source 2: Content-based detection ---
+    detected = _extract_tools_and_steps(skill.system_prompt)
+    for generic_name in detected["tools"]:
+        aliases = _TOOL_NAME_ALIASES.get(generic_name, [])
+        canary_names.update(aliases)
+
+    return sorted(canary_names)
+
+
+def _get_adversarial_for_skill(skill: "ResolvedSkill") -> list[str]:
+    """Return adversarial prompts targeting tools the skill uses."""
+    from skillscan_trace.canary.tools_config import get_adversarial_prompts
+
+    matched_tools = _resolve_canary_tools(skill)
+    if not matched_tools:
+        logger.debug("No canary tools matched for skill %s", skill.name)
+        return []
+
+    prompts = get_adversarial_prompts(matched_tools)
+    logger.debug(
+        "Matched %d canary tools -> %d adversarial prompts for %s",
+        len(matched_tools),
+        len(prompts),
+        skill.name,
+    )
+    return prompts

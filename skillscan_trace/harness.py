@@ -50,6 +50,7 @@ def run_trace(
     allowed_domains: set[str] | None = None,
     input_count: int = 3,
     input_model: str = "gpt-4.1-mini",
+    adversarial: bool = False,
     judge: bool = False,
     openai_api_key: str | None = None,
     anthropic_api_key: str | None = None,
@@ -104,6 +105,7 @@ def run_trace(
             count=input_count,
             api_key=effective_api_key,
             model=input_model,
+            adversarial=adversarial,
         )
         _progress(f"Generated {len(messages_to_run)} input(s), starting trace...")
 
