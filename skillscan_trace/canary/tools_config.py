@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
@@ -41,9 +41,7 @@ def _load_defaults() -> dict[str, Any]:
     return {}
 
 
-def _yaml_param_to_json_schema(
-    param_name: str, param: dict[str, Any]
-) -> dict[str, Any]:
+def _yaml_param_to_json_schema(param_name: str, param: dict[str, Any]) -> dict[str, Any]:
     """Convert a single YAML parameter definition to JSON Schema property."""
     schema: dict[str, Any] = {}
     ptype = param.get("type", "string")
@@ -102,9 +100,7 @@ def _tool_yaml_to_definition(tool_cfg: dict[str, Any]) -> dict[str, Any]:
 _TOOLS_CONFIG: dict[str, dict[str, Any]] = {}
 
 
-def load_tools() -> (
-    tuple[list[dict[str, Any]], dict[str, Any], dict[str, dict[str, Any]]]
-):
+def load_tools() -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, dict[str, Any]]]:
     """Load all tool YAML files and return runtime structures.
 
     Returns:
@@ -155,9 +151,7 @@ def load_tools() -> (
         if gen_name in GENERATOR_REGISTRY:
             generators[tool_name] = GENERATOR_REGISTRY[gen_name]
         elif gen_name:
-            logger.warning(
-                "Generator %r not found for tool %r", gen_name, tool_name
-            )
+            logger.warning("Generator %r not found for tool %r", gen_name, tool_name)
 
         # Store full metadata
         tool_meta[tool_name] = merged
@@ -220,19 +214,9 @@ def get_tools_for_category(category: str) -> list[str]:
     Returns:
         List of tool names in that category.
     """
-    return [
-        name
-        for name, spec in _TOOLS_CONFIG.items()
-        if spec.get("category") == category
-    ]
+    return [name for name, spec in _TOOLS_CONFIG.items() if spec.get("category") == category]
 
 
 def get_all_categories() -> list[str]:
     """Return sorted list of all unique categories."""
-    return sorted(
-        {
-            spec["category"]
-            for spec in _TOOLS_CONFIG.values()
-            if "category" in spec
-        }
-    )
+    return sorted({spec["category"] for spec in _TOOLS_CONFIG.values() if "category" in spec})

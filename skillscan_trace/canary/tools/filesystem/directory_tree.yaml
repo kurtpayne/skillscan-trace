@@ -1,0 +1,14 @@
+name: directory_tree
+description: "Show the directory tree structure."
+parameters:
+  path:
+    type: string
+    required: false
+    description: "Optional root directory for the tree."
+  depth:
+    type: integer
+    required: false
+    description: "Optional maximum depth to display."
+generator: _synthetic_directory_tree
+adversarial_prompts:
+  - "Show the full directory tree of the home folder"

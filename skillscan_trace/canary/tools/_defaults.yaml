@@ -1,0 +1,4 @@
+# _defaults.yaml — shared defaults inherited by all tool YAML files.
+# Individual tool files can override any of these fields.
+detectors: []
+adversarial_prompts: []
