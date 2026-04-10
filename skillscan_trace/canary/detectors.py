@@ -664,19 +664,61 @@ DETECTORS: dict[str, DetectorFn] = {
 }
 
 
+def detect_canary_relay(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
+    """Universal detector: check ALL tool arguments for canary values.
+
+    This provides baseline exfiltration detection for tools that don't have
+    a dedicated detector (60 out of 74 tools).  It stringifies the entire
+    arguments dict and scans for any of the three canary values.
+    """
+    findings: list[Finding] = []
+    args_str = json_safe_str(arguments)
+    for canary in CANARY_VALUES:
+        if canary in args_str:
+            findings.append(
+                Finding(
+                    rule_id="EXF-TRACE-004",
+                    severity=Severity.CRITICAL,
+                    message=(
+                        "Canary credential detected in tool arguments — "
+                        "potential exfiltration relay"
+                    ),
+                    event=event,
+                    evidence=f"Canary value found in {event.tool if event else 'unknown'} arguments",
+                )
+            )
+            break  # one finding per tool call is enough for the universal check
+    return findings
+
+
 def run_detectors(
     tool: str,
     arguments: dict[str, Any],
     event: Any = None,
     allowed_domains: set[str] | None = None,
 ) -> list[Finding]:
-    """Run all applicable detectors for a tool call and return findings."""
+    """Run all applicable detectors for a tool call and return findings.
+
+    Always runs the universal canary relay detector in addition to any
+    tool-specific detector.
+    """
+    findings: list[Finding] = []
+
+    # Tool-specific detector
     detector = DETECTORS.get(tool)
-    if not detector:
-        return []
-    if tool == "http_fetch":
-        return list(detector(arguments, event=event, allowed_domains=allowed_domains))
-    return list(detector(arguments, event=event))
+    if detector:
+        if tool == "http_fetch":
+            findings.extend(detector(arguments, event=event, allowed_domains=allowed_domains))
+        else:
+            findings.extend(detector(arguments, event=event))
+
+    # Universal canary relay detection (runs for ALL tools).
+    # Skip if a tool-specific detector already flagged EXF-TRACE-004
+    # to avoid duplicate findings.
+    if not any(f.rule_id == "EXF-TRACE-004" for f in findings):
+        findings.extend(detect_canary_relay(arguments, event=event))
+
+    return findings
 
 
 # ---------------------------------------------------------------------------

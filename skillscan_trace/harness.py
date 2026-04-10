@@ -26,7 +26,7 @@ import time
 from typing import Any
 
 from skillscan_trace.canary.server import CanaryServer, TraceLog
-from skillscan_trace.canary.server import TOOL_DEFINITIONS
+from skillscan_trace.canary.tools_config import TOOL_DEFINITIONS
 from skillscan_trace.models import TraceReport
 
 logger = logging.getLogger("skillscan_trace.harness")
