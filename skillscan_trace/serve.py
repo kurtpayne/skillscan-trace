@@ -66,14 +66,29 @@ class Job:
 _jobs: dict[str, Job] = {}
 _jobs_lock = threading.Lock()
 
+# TTL for in-memory jobs — configurable via JOB_TTL_SECONDS env var (default: 1 hour)
+JOB_TTL_SECONDS: int = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
+
+
+def _cleanup_expired_jobs() -> None:
+    """Remove jobs older than JOB_TTL_SECONDS. Must be called with _jobs_lock held."""
+    now = time.time()
+    expired = [jid for jid, job in _jobs.items() if now - job.created_at > JOB_TTL_SECONDS]
+    for jid in expired:
+        del _jobs[jid]
+    if expired:
+        logger.info("Cleaned up %d expired job(s)", len(expired))
+
 
 def _get_job(job_id: str) -> Job | None:
     with _jobs_lock:
+        _cleanup_expired_jobs()
         return _jobs.get(job_id)
 
 
 def _put_job(job: Job) -> None:
     with _jobs_lock:
+        _cleanup_expired_jobs()
         _jobs[job.job_id] = job
 
 
