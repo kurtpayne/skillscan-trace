@@ -442,6 +442,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         import shutil
         import tempfile
         import zipfile
+        from skillscan_trace import __version__
         from skillscan_trace.harness import run_trace
         from skillscan_trace.formatters import format_json
 
@@ -631,7 +632,7 @@ def _run_job(job: Job, cache_dir: Path) -> None:
         job.progress = "Finalizing report..."
         source_url: str | None = params.get("source_url")
         result_dict["provenance"] = {
-            "server_version": "0.2.0",
+            "server_version": __version__,
             "trace_engine": "skillscan-trace",
             "fly_region": os.environ.get("FLY_REGION", "unknown"),
             "fly_machine_id": os.environ.get("FLY_MACHINE_ID", "unknown"),
@@ -816,7 +817,9 @@ def create_app(
 
     @app.get("/v1/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0"}
+        from skillscan_trace import __version__
+
+        return {"status": "ok", "version": __version__}
 
     @app.post("/v1/submit", status_code=202)
     async def submit(req: SubmitRequest, request: Request) -> dict[str, str]:

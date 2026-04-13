@@ -35,17 +35,13 @@ skillscan-trace works by:
 4. Checking each call against a canary taxonomy (credential files, wallet paths, ENV vars, binary probing, network destinations)
 5. Emitting a structured trace report (JSON + SARIF) with every observed behavior and any findings
 
-The model runs locally via [Ollama](https://ollama.com/) — no API key required, no cloud dependency. API providers (OpenAI, OpenRouter, Anthropic) are supported for users who prefer them or want access to more capable models.
+The model runs locally via [Ollama](https://ollama.com/) — no API key required, no cloud dependency. API providers (OpenAI, OpenRouter) are supported for users who prefer them or want access to more capable models.
 
 ---
 
 ## Status
 
 **v0.2.0 — verdict banner + full CI matrix.** All phases implemented and 199/199 tests pass across Python 3.11, 3.12, and 3.13. The tool is installable and usable today.
-
-See [`SPEC.md`](./SPEC.md) for the full behavioral specification.  
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the system design.  
-See [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md) for the build plan and phase status.
 
 ---
 
@@ -68,6 +64,9 @@ skillscan-trace run ./skill/ --provider openrouter --model mistralai/mistral-7b-
 # Run with a local Ollama model (no API key required)
 # Model must support tool calling — llama3.1:8b and llama3.2:3b are verified
 skillscan-trace run ./skill/ --provider ollama --model llama3.1:8b
+
+# Dry run — validate config and skill loading without calling the LLM
+skillscan-trace run ./skill/ --dry-run
 
 # Run with explicit base URL (Azure, Mistral, etc.)
 skillscan-trace run ./skill/ --base-url https://api.mistral.ai/v1 --api-key $MISTRAL_KEY

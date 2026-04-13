@@ -65,7 +65,8 @@ def _load_dotenv() -> None:
         logging.getLogger(__name__).debug("Loaded .env from %s", dotenv_path)
 
 
-@click.group()
+@click.group(context_settings=dict(help_option_names=["-h", "--help"]))
+@click.version_option(version=None, prog_name="skillscan-trace", package_name="skillscan-trace")
 @click.option("--debug", is_flag=True, help="Enable debug logging.")
 @click.option(
     "--config",
@@ -908,7 +909,11 @@ def models(provider: str | None, api_key: str | None, base_url: str | None) -> N
     from openai import OpenAI
 
     client = OpenAI(api_key=effective_key, base_url=resolved_base_url)
-    model_list = client.models.list()
+    try:
+        model_list = client.models.list()
+    except Exception as e:
+        console.print(f"[red]Failed to list models: {e}[/red]")
+        sys.exit(1)
 
     table = Table(title=f"Available Models ({provider or 'openai'})")
     table.add_column("ID")
