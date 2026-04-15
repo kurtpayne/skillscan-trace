@@ -1,6 +1,25 @@
 # Privacy & Key Handling
 
-skillscan-trace is a local tool. **Your skill files, API keys, and trace results never leave your machine** except for the LLM API calls you explicitly authorize.
+skillscan-trace is a local-first tool. **Your API keys are passed directly to the LLM provider and are never stored, logged, or transmitted by SkillScan.** Your skill files, API keys, and trace results never leave your machine except for the LLM API calls you explicitly authorize.
+
+---
+
+## Data flow
+
+```
+                        HTTPS
+  You  ──────────►  skillscan-trace  ──────────►  LLM Provider
+                    (your machine)                (OpenAI / OpenRouter / Ollama)
+                         │                              ▲
+                         │                              │
+                         │   API key goes here only ────┘
+                         │
+                         ▼
+                    Trace report
+                    (local files)
+```
+
+API keys are read from your environment (`.env`, shell export, or `--api-key` flag), held in memory for the duration of the run, and passed directly to the LLM provider over HTTPS. They are never written to disk, never logged, and never sent to any SkillScan server or third party.
 
 ---
 
@@ -80,6 +99,48 @@ They do not contain your API key, your system's real credential files, or any da
 
 ---
 
+## Hosted service (trace.skillscan.sh)
+
+The hosted service at `trace.skillscan.sh` follows the **BYOK (Bring Your Own Key)** model:
+
+- Your API key is forwarded to the LLM provider over HTTPS. It is never stored, logged, or cached by the hosted service.
+- Trace reports are cached in Cloudflare R2 storage, keyed by `sha256(skill content + model + parameters)`. **Only the report is cached — never your API key.**
+- Errored traces are not cached.
+- The Cloudflare Worker enforces rate limits and CORS, but does not inspect or store API keys.
+- Skill file content is held in memory during the trace run and discarded after the report is generated. It is not stored beyond the trace session.
+
+```
+                     HTTPS                          HTTPS
+  You  ──────────►  trace.skillscan.sh  ──────────►  LLM Provider
+                    (CF Worker + Fly.io)              (OpenAI / OpenRouter)
+                         │                                  ▲
+                         │                                  │
+                         │   API key forwarded here only ───┘
+                         │
+                         ▼
+                    R2 Cache
+                    (report only, no keys)
+```
+
+---
+
+## What is NOT stored
+
+- **API keys** — never stored, logged, or cached anywhere by SkillScan (local or hosted)
+- **Skill file contents** — not retained beyond the trace session
+- **User identity** — no accounts, no login, no tracking
+- **Telemetry** — skillscan-trace has no telemetry, no analytics, and no phone-home behavior
+
+---
+
+## What IS stored
+
+- **Trace reports** (local mode) — written to `--output-dir` (default: `./trace-output/`) on your local filesystem
+- **Cached reports** (serve mode) — stored in `--cache-dir` on the server's local filesystem
+- **Cached reports** (hosted service) — stored in Cloudflare R2, keyed by content hash
+
+---
+
 ## Summary
 
 | Data | Where it goes |
@@ -88,8 +149,9 @@ They do not contain your API key, your system's real credential files, or any da
 | API key | LLM provider only (never stored or logged) |
 | Canary tool definitions | LLM provider (tool schemas, no real values) |
 | Canary credential values | Your machine only (in-process canary server) |
-| Trace report | Your local filesystem only |
+| Trace report | Local filesystem / R2 cache (hosted mode) |
 | Your real credential files | Not accessed (canary uses synthetic files) |
 | `.env` file contents | Your machine only (never transmitted) |
+| Telemetry / analytics | None — no phone-home, no tracking |
 
 If you have questions or concerns about data handling, open an issue at [github.com/kurtpayne/skillscan-trace](https://github.com/kurtpayne/skillscan-trace/issues).

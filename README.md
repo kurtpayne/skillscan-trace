@@ -143,11 +143,17 @@ skillscan-trace is a sibling project to [skillscan-security](https://github.com/
 
 ---
 
-## Privacy & Key Handling
+## Privacy & Security
 
-Your API key goes directly to the LLM provider you chose. The canary server runs in-process on your machine. Nothing leaves your network except the LLM API calls you explicitly authorize. SkillScan has no server-side component in local mode.
+**Your API keys are never stored, logged, or transmitted by SkillScan** — they are passed directly to the LLM provider you chose over HTTPS and held in memory only for the duration of the run.
 
-See [`PRIVACY.md`](./PRIVACY.md) for the full data flow explanation.
+- **No telemetry, no analytics, no phone-home** — skillscan-trace makes zero network requests beyond the LLM API calls you explicitly authorize
+- **Local-first** — the canary server runs in-process on your machine; nothing leaves your network except LLM API calls
+- **Hosted service (trace.skillscan.sh)** — follows the BYOK model; your API key is forwarded to the LLM provider and never stored or cached; only the trace report is cached
+- **No user identity** — no accounts, no login, no tracking
+- **Ollama** — fully local, zero external network requests, no API key required
+
+See [`PRIVACY.md`](./PRIVACY.md) for the full data flow diagram and detailed explanation.
 
 ---
 
