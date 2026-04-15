@@ -38,7 +38,7 @@ console = Console()
 try:
     import requests as req_lib  # noqa: F401
 except ImportError:
-    req_lib = None  # type: ignore[assignment]
+    req_lib = None  # type: ignore[assignment,unused-ignore]
 
 
 def _load_dotenv() -> None:
@@ -333,7 +333,9 @@ def run(
     fail_on_malicious = cfg.get("fail_on_malicious", False)
     allow_domains = tuple(cfg.get("allow_domains", []))
 
-    base_url, api_key, model = _resolve_provider(provider, api_key, base_url, model)
+    base_url, api_key, model = _resolve_provider(
+        provider, api_key, base_url, model or "gpt-4.1-mini"
+    )
     from skillscan_trace.formatters import format_sarif, format_batch_summary
 
     # ── Remote mode (B5) ──────────────────────────────────────────────────────
@@ -344,8 +346,8 @@ def run(
             api_key=api_key,
             provider=provider,
             model=model,
-            variants=variants,
-            max_turns=max_turns,
+            variants=variants or 3,
+            max_turns=max_turns or 10,
             output_dir=output_dir or "trace-output",
             output_format=output_format or "json",
             judge=judge or False,
@@ -363,9 +365,9 @@ def run(
             models=model_list,
             api_key=api_key,
             base_url=base_url,
-            input_model=input_model,
-            variants=variants,
-            max_turns=max_turns,
+            input_model=input_model or model,
+            variants=variants or 3,
+            max_turns=max_turns or 10,
             output_dir=output_dir or "trace-output",
             output_format=output_format or "json",
             judge=judge or False,
@@ -413,16 +415,16 @@ def run(
                 report = _run_single(
                     skill_path=str(skill_file),
                     model=model,
-                    input_model=input_model,
+                    input_model=input_model or model,
                     api_key=api_key,
                     base_url=base_url,
-                    variants=variants,
-                    max_turns=max_turns,
+                    variants=variants or 3,
+                    max_turns=max_turns or 10,
                     out_dir=out_dir,
-                    output_format=output_format,
+                    output_format=output_format or "json",
                     allowed_domains=allowed_domains,
                     dry_run=dry_run,
-                    judge=judge,
+                    judge=judge or False,
                     anthropic_api_key=anthropic_api_key,
                     quiet=quiet,
                 )
@@ -433,16 +435,16 @@ def run(
         report = _run_single(
             skill_path=str(skill_files[0]),
             model=model,
-            input_model=input_model,
+            input_model=input_model or model,
             api_key=api_key,
             base_url=base_url,
-            variants=variants,
-            max_turns=max_turns,
+            variants=variants or 3,
+            max_turns=max_turns or 10,
             out_dir=out_dir,
-            output_format=output_format,
+            output_format=output_format or "json",
             allowed_domains=allowed_domains,
             dry_run=dry_run,
-            judge=judge,
+            judge=judge or False,
             anthropic_api_key=anthropic_api_key,
             quiet=quiet,
         )
@@ -452,7 +454,7 @@ def run(
     elapsed = time.time() - batch_start
 
     # SARIF: write a single combined file for the whole batch
-    if output_format.lower() == "sarif" and all_reports:
+    if (output_format or "json").lower() == "sarif" and all_reports:
         sarif_path = out_dir / "results.sarif"
         sarif_path.write_text(format_sarif(all_reports))
         console.print(f"\n[green]SARIF written to {sarif_path}[/green]")

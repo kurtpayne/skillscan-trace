@@ -101,7 +101,7 @@ class CanaryServer:
         # Generate synthetic response
         generator = SYNTHETIC_RESPONSE_GENERATORS.get(tool)
         if generator:
-            synthetic_response = generator(arguments)
+            synthetic_response: str = generator(arguments)
         else:
             synthetic_response = f"# unknown tool: {tool}\n"
             logger.warning("Unknown tool called: %s", tool)
