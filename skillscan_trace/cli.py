@@ -797,12 +797,9 @@ def _display_report(report: Any) -> None:
             args_preview = json.dumps(e.arguments)[:60]
             console.print(f"  [dim]turn {e.turn}[/dim] {e.tool}({args_preview}){finding_marker}")
 
-    # Judge verdict
+    # Judge detail lines (shown above the verdict banner if judge was run)
     if report.judge_result is not None:
         jr = report.judge_result
-        verdict_val = jr.final_verdict.value  # "malicious" | "benign" | "uncertain"
-
-        # Inline detail lines (dim, shown above the banner)
         console.print(
             f"\n[dim]GPT-4.1: {jr.judge_a.verdict.value} ({jr.judge_a.confidence:.0%})"
             f" — {jr.judge_a.reasoning[:120]}[/dim]"
@@ -812,33 +809,36 @@ def _display_report(report: Any) -> None:
             f" — {jr.judge_b.reasoning[:120]}[/dim]"
         )
 
-        # Verdict banner — prominent Rich Panel
-        _VERDICT_STYLES: dict[str, tuple[str, str, str]] = {
-            "malicious": ("bold white on red", "red", "\u2716 MALICIOUS"),
-            "benign": ("bold white on green", "green", "\u2714 BENIGN"),
-            "uncertain": ("bold black on yellow", "yellow", "\u26a0 UNCERTAIN"),
-        }
-        text_style, border_style, label = _VERDICT_STYLES.get(
-            verdict_val, ("bold white", "white", verdict_val.upper())
-        )
-        finding_count = report.total_findings
+    # Verdict banner — always shown (based on findings + judge if available)
+    from skillscan_trace.formatters import format_verdict_banner
+
+    banner = format_verdict_banner(report)
+
+    subtitle_parts: list[str] = []
+    if banner["finding_count"]:
+        subtitle_parts.append(f"{banner['finding_count']} finding(s)")
+    if banner["max_severity"]:
+        subtitle_parts.append(banner["max_severity"])
+    subtitle_parts.append(f"Model: {banner['model']}")
+    if report.judge_result is not None:
+        jr = report.judge_result
         agreement_str = jr.agreement.value.replace("_", " ")
-        subtitle_parts = [f"agreement: {agreement_str}"]
-        if finding_count:
-            subtitle_parts.append(f"{finding_count} finding(s)")
+        subtitle_parts.append(f"agreement: {agreement_str}")
         if jr.needs_human_review:
             subtitle_parts.append("\u26a0 human review flagged")
-        subtitle = "  |  ".join(subtitle_parts)
+    for jl in banner["judge_lines"]:
+        subtitle_parts.append(jl)
+    subtitle = "  |  ".join(subtitle_parts)
 
-        banner_text = Text(label, style=text_style, justify="center")
-        console.print(
-            Panel(
-                banner_text,
-                subtitle=f"[dim]{subtitle}[/dim]",
-                border_style=border_style,
-                padding=(0, 4),
-            )
+    banner_text = Text(banner["verdict_label"], style=banner["text_style"], justify="center")
+    console.print(
+        Panel(
+            banner_text,
+            subtitle=f"[dim]{subtitle}[/dim]",
+            border_style=banner["border_style"],
+            padding=(0, 4),
         )
+    )
 
 
 @main.command()

@@ -232,6 +232,108 @@ def format_text(report: TraceReport) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Verdict computation
+# ---------------------------------------------------------------------------
+
+# Severity ranking for comparison
+_SEVERITY_RANK: dict[str, int] = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "info": 0,
+}
+
+
+def compute_verdict(report: TraceReport) -> str:
+    """Compute a verdict string from findings and judge result.
+
+    Returns one of: "MALICIOUS", "REVIEW", "BENIGN".
+
+    Logic:
+      - If judge says malicious -> MALICIOUS
+      - If any high/critical finding -> MALICIOUS
+      - If judge says uncertain or needs_human_review -> REVIEW
+      - If any medium finding -> REVIEW
+      - Otherwise -> BENIGN
+    """
+    # Judge verdict takes priority if present
+    if report.judge_verdict == "malicious":
+        return "MALICIOUS"
+
+    max_sev = _max_severity(report)
+
+    if max_sev in ("critical", "high"):
+        return "MALICIOUS"
+
+    if report.judge_result and report.judge_result.needs_human_review:
+        return "REVIEW"
+    if report.judge_verdict == "uncertain":
+        return "REVIEW"
+    if max_sev == "medium":
+        return "REVIEW"
+
+    return "BENIGN"
+
+
+def _max_severity(report: TraceReport) -> str | None:
+    """Return the highest severity string from report findings, or None."""
+    if not report.findings:
+        return None
+    best: str | None = None
+    best_rank = -1
+    for f in report.findings:
+        rank = _SEVERITY_RANK.get(f.severity.value, 0)
+        if rank > best_rank:
+            best_rank = rank
+            best = f.severity.value
+    return best
+
+
+def format_verdict_banner(report: TraceReport) -> dict[str, Any]:
+    """Compute verdict banner data for Rich rendering.
+
+    Returns a dict with keys:
+      verdict: "MALICIOUS" | "REVIEW" | "BENIGN"
+      verdict_label: display string with icon
+      border_style: Rich color for Panel border
+      text_style: Rich style for verdict text
+      finding_count: int
+      max_severity: str | None
+      model: str
+      judge_lines: list[str] — per-judge summary lines (empty if no judge)
+    """
+    verdict = compute_verdict(report)
+    max_sev = _max_severity(report)
+
+    styles: dict[str, tuple[str, str, str]] = {
+        "MALICIOUS": ("bold white on red", "red", "\u2716 MALICIOUS"),
+        "REVIEW": ("bold black on yellow", "yellow", "\u26a0 REVIEW"),
+        "BENIGN": ("bold white on green", "green", "\u2714 BENIGN"),
+    }
+    text_style, border_style, label = styles[verdict]
+
+    judge_lines: list[str] = []
+    if report.judge_result is not None:
+        jr = report.judge_result
+        judge_lines.append(
+            f"Judge: GPT-4.1 {jr.judge_a.verdict.value.upper()}, "
+            f"Sonnet {jr.judge_b.verdict.value.upper()}"
+        )
+
+    return {
+        "verdict": verdict,
+        "verdict_label": label,
+        "border_style": border_style,
+        "text_style": text_style,
+        "finding_count": report.total_findings,
+        "max_severity": max_sev.upper() if max_sev else None,
+        "model": report.model,
+        "judge_lines": judge_lines,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Batch summary
 # ---------------------------------------------------------------------------
 
