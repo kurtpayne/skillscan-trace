@@ -34,7 +34,11 @@ import re
 from typing import Any, Callable
 
 from skillscan_trace.models import Finding, Severity
-from skillscan_trace.canary.bash_ast import analyze_bash_ast, BashParseError
+from skillscan_trace.canary.bash_ast import (
+    analyze_bash_ast,
+    analyze_bash_with_fallback,
+    BashParseError,
+)
 
 DetectorFn = Callable[..., list[Finding]]
 
@@ -197,28 +201,30 @@ def detect_bash(arguments: dict[str, Any], event: Any = None) -> list[Finding]:
         return findings
 
     # --- Layer 1: AST-based detection (Trace-A5) ---
-    ast_used = False
+    # Use the fallback-aware entry point so BASH-PARSE-ERROR findings are
+    # emitted (with regex-fallback findings) when bashlex cannot parse.
+    ast_used = True
     try:
         ast_findings = analyze_bash_ast(command)
-        ast_used = True
-        # Deduplicate by rule_id+evidence before adding
-        seen = set()
-        for bf in ast_findings:
-            key = (bf.rule_id, bf.evidence[:80])
-            if key not in seen:
-                seen.add(key)
-                findings.append(
-                    Finding(
-                        rule_id=bf.rule_id,
-                        severity=bf.severity,
-                        message=bf.message + " [ast]",
-                        event=event,
-                        evidence=bf.evidence,
-                    )
-                )
     except BashParseError:
-        # Fall through to regex layer
-        pass
+        ast_used = False
+        ast_findings = analyze_bash_with_fallback(command)
+
+    # Deduplicate by rule_id+evidence before adding
+    seen = set()
+    for bf in ast_findings:
+        key = (bf.rule_id, bf.evidence[:80])
+        if key not in seen:
+            seen.add(key)
+            findings.append(
+                Finding(
+                    rule_id=bf.rule_id,
+                    severity=bf.severity,
+                    message=bf.message + (" [ast]" if ast_used else " [regex-fallback]"),
+                    event=event,
+                    evidence=bf.evidence,
+                )
+            )
 
     # --- Layer 2: Regex patterns (always runs as belt-and-suspenders) ---
     # Run regex regardless of AST success to catch obfuscated commands that
