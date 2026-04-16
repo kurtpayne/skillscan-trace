@@ -99,6 +99,59 @@ skillscan-trace handles all skill formats found in the wild:
 
 ---
 
+## Docker
+
+A single image supports both `run` (single trace) and `serve` (HTTP API) modes. The same image powers the hosted service at [trace.skillscan.sh](https://trace.skillscan.sh) and enterprise self-hosting.
+
+Pull the image:
+
+```bash
+docker pull kurtpayne/skillscan-trace:latest
+```
+
+### Run mode (single trace)
+
+Mount your skill and pass an API key via env var. The container exits after the trace completes.
+
+```bash
+docker run --rm \
+  -v "$(pwd)":/data \
+  -e OPENAI_API_KEY=sk-... \
+  kurtpayne/skillscan-trace run /data/SKILL.md
+```
+
+Use OpenRouter instead:
+
+```bash
+docker run --rm \
+  -v "$(pwd)":/data \
+  -e OPENROUTER_API_KEY=sk-or-... \
+  kurtpayne/skillscan-trace run /data/SKILL.md --provider openrouter
+```
+
+Fully local with Ollama on the host:
+
+```bash
+docker run --rm --network host \
+  -v "$(pwd)":/data \
+  kurtpayne/skillscan-trace run /data/SKILL.md --provider ollama
+```
+
+### Serve mode (HTTP API)
+
+Starts the FastAPI server on port 8080. Callers provide their own API key per request (BYOK) — keys are never logged or stored.
+
+```bash
+docker run -d -p 8080:8080 --name sst \
+  kurtpayne/skillscan-trace serve
+
+curl http://localhost:8080/v1/health
+```
+
+For persistent caching across restarts, mount volumes for `/trace-cache` and `/trace-output`. A full `docker-compose.yml` is provided in the repository root.
+
+---
+
 ## Output: Trace Report
 
 Every trace produces a JSON trace report and optionally a SARIF report.
