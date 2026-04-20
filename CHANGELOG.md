@@ -6,6 +6,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.0] — 2026-04-20
+
+### Added
+- `-h` help shorthand and `--version` flag
+- Verdict banner (MALICIOUS/REVIEW/BENIGN) in CLI output
+- PRIVACY.md with data flow documentation
+- Bash AST analysis via bashlex (6 BASH-* rule IDs)
+- Multi-mode Docker image (run + serve)
+- release-docker.yml for automated multi-arch builds
+
+### Fixed
+- Version strings unified to single source (was 3 different values)
+- `models` command crash on unavailable provider
+- mypy errors in canary server and CLI
+- README: removed Anthropic as provider, nonexistent doc references
+
+---
+
 ## [Unreleased]
 
 ---
